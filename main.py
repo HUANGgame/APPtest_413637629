@@ -1095,9 +1095,12 @@ def selftest():
         pidb=next(p['id'] for p in rooms[c]['ps'] if p['token']==g2['token'])
         co_kp(c,CoKpIn(token=a['token'],pid=pidb,enabled=True)); assert state(c,g2['token'])['role']=='kp'; checks.append('co_kp')
         # sheet parser: realistic CoC7 V3 layout
-        rows=[['']*26 for _ in range(90)]
+        rows=[['']*26 for _ in range(150)]
         rows[4][0]='角色'; rows[4][1]='哈利'; rows[4][6]='職位'; rows[4][8]='富二代'
-        rows[7][0]='年齡'; rows[7][1]='16'
+        rows[5][0]='玩家'; rows[5][1]='笨魚魚'; rows[5][6]='出生地'; rows[5][8]='海南島'
+        rows[6][0]='性別'; rows[6][1]='男'; rows[6][6]='居住地'; rows[6][8]='台北'
+        rows[7][0]='年齡'; rows[7][1]='16'; rows[7][6]='學歷'; rows[7][8]='高中'
+        rows[8][0]='特徵'; rows[8][2]='心理測量'; rows[8][6]='特徵2'; rows[8][9]='其他語言'
         rows[10][0]='職業'; rows[10][3]='罪犯-放高利貸者'
         attr_specs=[('力量',70,-5,65),('敏捷',75,None,75),('意志',70,None,70),('體質',85,None,85),('外貌',60,None,60),('教育',60,-5,55),('體型',60,None,60),('智力',50,None,50)]
         for idx,(label,base,other,finalv) in enumerate(attr_specs,start=6):
@@ -1113,15 +1116,36 @@ def selftest():
         rows[26][15]='藝術／手藝：'; rows[26][16]='美術'; rows[26][24]='5'
         rows[27][15]='格鬥'; rows[27][16]='鬥毆'; rows[27][24]='25'
         rows[28][1]='生存:'; rows[28][11]='10'
-        rows[40][0]='武器(詳情)'
+        rows[18][14]='貨幣'; rows[18][17]='美國-現代'
+        rows[19][14]='生活水平'; rows[19][17]='小康'; rows[19][20]='現金'; rows[19][21]='5,000美金'
+        rows[20][14]='消費水平'; rows[20][17]='1,000美金'
+        rows[21][14]='資產'; rows[21][17]='500,000美金'
+        rows[22][14]='資產內容'; rows[22][17]='房產與存款'
+        rows[40][0]='武器(詳情)'; rows[41][0]='名稱'; rows[42][0]='空手'; rows[42][6]='格鬥（鬥毆）'; rows[42][10]='25'; rows[42][11]='1d3'
+        rows[87][0]='調查員背景故事'
+        rows[88][0]='形象描述'; rows[88][2]='像哈利波特'; rows[88][12]='性格特徵'; rows[88][15]='機靈'
+        rows[91][0]='思想/信念'; rows[91][2]='人類不可信'
+        rows[94][0]='重要之人及理由'; rows[94][2]='母親'
+        rows[97][0]='意義非凡之地'; rows[97][2]='草原'; rows[97][12]='寶貴之物'; rows[97][15]='媽媽的眼鏡'
+        rows[102][7]='心靈支柱'; rows[102][10]='思想/信念'
+        rows[103][7]='經驗包'; rows[103][10]='罪犯經歷包'
+        rows[104][7]='生平故事'; rows[104][10]='從小跟動物生活'
+        rows[113][0]='隨身物品'; rows[114][0]='眼鏡'; rows[114][5]='皮夾'; rows[114][11]='睡袋'
+        rows[119][0]='遭遇的超自然事物(劇本)'
+        rows[129][0]='調查員同伴及關係人'
+        rows[137][0]='咒文'
+        rows[145][0]='第三類接觸'
         parsed=parse_sheet_rows(rows)
         assert parsed['name']=='哈利' and parsed['occupation']=='罪犯-放高利貸者' and parsed['age']=='16'
         assert parsed['attrs']['STR']==65 and parsed['attrs']['EDU']==55 and parsed['luck']==75
         assert parsed['hp']==11 and parsed['mp']==14 and parsed['san']==60
         assert parsed['skills']['心理學']==50 and parsed['skills']['藝術／手藝：美術']==5 and parsed['skills']['格鬥：鬥毆']==25
         assert '生存' not in parsed['skills'] and '生存:' not in parsed['skills']
-        assert parsed['gender']=='' and parsed['mov']==0
-        checks.append('sheet_parse_v3')
+        assert parsed['gender']=='男' and parsed['birthplace']=='海南島' and parsed['residence']=='台北' and parsed['education']=='高中'
+        assert parsed['traits']=='心理測量、其他語言' and parsed['cash']=='5,000美金' and parsed['assets']=='500,000美金'
+        assert '空手' in parsed['weapons'] and '眼鏡' in parsed['inventory'] and parsed['appearance_desc']=='像哈利波特'
+        assert parsed['personality']=='機靈' and parsed['ideology']=='人類不可信' and parsed['backstory']=='從小跟動物生活'
+        checks.append('sheet_parse_v3_full')
         # room-management flow
         m=create(Create(name='MGMT',scenario='自由跑團',limit=3)); mc=m['code']
         ma=join(Join(code=mc,name='M-A')); mb=join(Join(code=mc,name='M-B'))
