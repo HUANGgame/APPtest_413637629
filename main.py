@@ -28,11 +28,19 @@ def make_code():
 
 def blank_char():
     return {
-        'name': '', 'occupation': '', 'age': '',
+        'name': '', 'occupation': '', 'age': '', 'gender': '',
+        'position': '', 'birthplace': '', 'residence': '', 'education': '', 'sheet_player': '',
+        'traits': '', 'occupation_notes': '',
         'attrs': {k: 0 for k in ['STR','CON','SIZ','DEX','APP','INT','POW','EDU']},
         'hp': 10, 'mp': 10, 'san': 50, 'luck': 50,
+        'mov': 0, 'build': '', 'db': '', 'inspiration': 0, 'knowledge': 0,
         'skills': dict(DEFAULT_SKILLS),
-        'inventory': '', 'public_notes': '', 'private_notes': '',
+        'currency': '', 'living_standard': '', 'cash': '', 'spending_level': '', 'assets': '', 'asset_details': '',
+        'appearance_desc': '', 'personality': '', 'ideology': '', 'scars': '',
+        'significant_person': '', 'phobias': '', 'meaningful_place': '', 'treasured_item': '',
+        'anchor': '', 'experience_pack': '', 'backstory': '',
+        'inventory': '', 'weapons': '', 'adventures': '', 'contacts': '', 'spells': '', 'supernatural': '',
+        'public_notes': '', 'private_notes': '',
         'visibility': 'kp_only', 'source': 'manual'
     }
 
@@ -451,42 +459,53 @@ def cell(rows, r, c):
 
 
 def parse_sheet_rows(rows):
-    """Parse CoC7 自動計算人物卡 V3 by labels, with fallbacks for common copies."""
+    """Parse the CoC7 自動計算人物卡 V3, including background and secondary sections."""
     def txt(r, c):
         return str(cell(rows, r, c) or '').strip()
 
     def num(r, c, default=None):
         return safe_int(cell(rows, r, c), default)
 
-    def find_row(label, cols=(1, 7, 15, 21), start=1, end_row=None):
+    def find_row(label, cols=None, start=1, end_row=None, starts=False):
         end_row = min(len(rows), end_row or len(rows))
+        cols = cols or tuple(range(1, 27))
         for rr in range(start, end_row + 1):
             for cc in cols:
-                if txt(rr, cc) == label:
+                value = txt(rr, cc)
+                if (value.startswith(label) if starts else value == label):
                     return rr, cc
         return None, None
 
-    def value_after_label(label, value_col_offset=1, cols=(1, 7, 15, 21), start=1, end_row=30):
-        rr, cc = find_row(label, cols, start, end_row)
-        return txt(rr, cc + value_col_offset) if rr else ''
-
     def attribute_value(label):
-        rr, cc = find_row(label, cols=(15,), start=4, end_row=20)
+        rr, _ = find_row(label, cols=(15,), start=4, end_row=20)
         if not rr:
             return 0
-        # 人物屬性區：Q=開卡、R=其他、S=最終值。優先 S，空白再退回 Q。
         final_v = num(rr, 19, None)
-        if final_v is not None:
-            return final_v
-        return num(rr, 17, 0) or 0
+        return final_v if final_v is not None else (num(rr, 17, 0) or 0)
 
     def current_stat(label, fallback):
-        rr, cc = find_row(label, cols=(21,), start=4, end_row=20)
+        rr, _ = find_row(label, cols=(21,), start=4, end_row=20)
         if rr:
-            v = num(rr, 22, None)  # V 欄目前值
+            v = num(rr, 22, None)
             if v is not None:
                 return v
         return fallback
+
+    def derived_text(label):
+        rr, _ = find_row(label, cols=(21,), start=4, end_row=20)
+        return txt(rr, 22) if rr else ''
+
+    def section_rows(start_label, end_label=None, start_offset=1):
+        sr, _ = find_row(start_label, cols=(1,), start=1, end_row=len(rows), starts=True)
+        if not sr:
+            return []
+        start_r = sr + start_offset
+        end_r = len(rows)
+        if end_label:
+            er, _ = find_row(end_label, cols=(1,), start=start_r, end_row=len(rows), starts=True)
+            if er:
+                end_r = er - 1
+        return list(range(start_r, end_r + 1))
 
     def skill_name(base, subtype):
         base = (base or '').strip()
@@ -498,37 +517,61 @@ def parse_sheet_rows(rows):
         if subtype in ('技能名稱', '☐', '☑'):
             subtype = ''
         if base and subtype:
-            base_clean = base.rstrip('：:')
-            return f'{base_clean}：{subtype}'
+            return f"{base.rstrip('：:')}：{subtype}"
         if subtype:
             return subtype
         if base.endswith(('：', ':')):
-            # 未填專精名稱的模板佔位（生存:、駕駛:、學問: 等）不匯入。
             return ''
         return base
 
-    name = value_after_label('角色', cols=(1,), start=1, end_row=15)
-    age = value_after_label('年齡', cols=(1,), start=1, end_row=15)
+    # Basic identity.
+    r, _ = find_row('角色', cols=(1,), start=1, end_row=20)
+    name = txt(r, 2) if r else ''
+    r, _ = find_row('玩家', cols=(1,), start=1, end_row=20)
+    sheet_player = txt(r, 2) if r else ''
+    r, _ = find_row('性別', cols=(1,), start=1, end_row=20)
+    gender = txt(r, 2) if r else ''
+    r, _ = find_row('年齡', cols=(1,), start=1, end_row=20)
+    age = txt(r, 2) if r else ''
 
-    # 真正職業名稱在 A 欄「職業」對應 D 欄；若版本不同才退回「職位」的 I 欄。
-    occupation = ''
-    occ_row, _ = find_row('職業', cols=(1,), start=1, end_row=20)
-    if occ_row:
-        occupation = txt(occ_row, 4)
+    r, _ = find_row('職位', cols=(7,), start=1, end_row=20)
+    position = txt(r, 9) if r else ''
+    r, _ = find_row('出生地', cols=(7,), start=1, end_row=20)
+    birthplace = txt(r, 9) if r else ''
+    r, _ = find_row('居住地', cols=(7,), start=1, end_row=20)
+    residence = txt(r, 9) if r else ''
+    r, _ = find_row('學歷', cols=(7,), start=1, end_row=20)
+    education = txt(r, 9) if r else ''
+
+    r, _ = find_row('職業', cols=(1,), start=1, end_row=20)
+    occupation = txt(r, 4) if r else ''
     if not occupation:
-        pos_row, _ = find_row('職位', cols=(7,), start=1, end_row=15)
-        if pos_row:
-            occupation = txt(pos_row, 9)
+        occupation = position
+
+    trait_parts = []
+    r, _ = find_row('特徵', cols=(1,), start=1, end_row=20)
+    if r and txt(r, 3):
+        trait_parts.append(txt(r, 3))
+    r2, _ = find_row('特徵2', cols=(7,), start=1, end_row=20)
+    if r2 and txt(r2, 10):
+        trait_parts.append(txt(r2, 10))
+    traits = '、'.join(trait_parts)
+
+    occupation_notes = ''
+    r, _ = find_row('職業備忘', cols=(1,), start=1, end_row=30)
+    if r:
+        chunks=[]
+        for rr in range(r+1, min(r+5, len(rows)+1)):
+            v=txt(rr,1)
+            if v:
+                chunks.append(v)
+        occupation_notes='\n'.join(chunks)
 
     attrs = {
-        'STR': attribute_value('力量'),
-        'DEX': attribute_value('敏捷'),
-        'POW': attribute_value('意志'),
-        'CON': attribute_value('體質'),
-        'APP': attribute_value('外貌'),
-        'EDU': attribute_value('教育'),
-        'SIZ': attribute_value('體型'),
-        'INT': attribute_value('智力'),
+        'STR': attribute_value('力量'), 'DEX': attribute_value('敏捷'),
+        'POW': attribute_value('意志'), 'CON': attribute_value('體質'),
+        'APP': attribute_value('外貌'), 'EDU': attribute_value('教育'),
+        'SIZ': attribute_value('體型'), 'INT': attribute_value('智力'),
     }
     luck = attribute_value('幸運')
     hp_default = math.floor((attrs['CON'] + attrs['SIZ']) / 10) if attrs['CON'] or attrs['SIZ'] else 10
@@ -537,41 +580,140 @@ def parse_sheet_rows(rows):
     hp = current_stat('生命', hp_default)
     mp = current_stat('魔法', mp_default)
     san = current_stat('心智', san_default)
+    mov = safe_int(derived_text('MOV'), 0)
+    build = derived_text('體格')
+    db = derived_text('DB')
+    inspiration = safe_int(derived_text('靈感'), attrs['INT'])
+    knowledge = safe_int(derived_text('知識'), attrs['EDU'])
 
-    # 找技能表頭，避免人物卡版本插入列時整段錯位。
+    # Assets / money.
+    def right_value(label, label_col, value_col, start=15, end_row=30):
+        rr, _ = find_row(label, cols=(label_col,), start=start, end_row=end_row)
+        return txt(rr, value_col) if rr else ''
+
+    currency = right_value('貨幣',15,18)
+    living_standard = right_value('生活水平',15,18)
+    spending_level = right_value('消費水平',15,18)
+    assets = right_value('資產',15,18)
+    asset_details = right_value('資產內容',15,18)
+    cash = right_value('現金',21,22)
+
+    # Skills.
     skill_header = None
-    for rr in range(1, min(len(rows), 140) + 1):
+    for rr in range(1, min(len(rows), 150) + 1):
         if txt(rr, 1) == '技能名稱' or txt(rr, 15) == '技能名稱':
             skill_header = rr
             break
     skill_start = (skill_header + 2) if skill_header else 27
-
     skills = {}
     for rr in range(skill_start, min(len(rows), 150) + 1):
-        if txt(rr, 1).startswith('武器') or txt(rr, 1) == '名稱':
+        if txt(rr, 1).startswith('武器'):
             break
-
         left = skill_name(txt(rr, 2), txt(rr, 3))
-        left_val = num(rr, 12, None)  # L：合計
+        left_val = num(rr, 12, None)
         if left and left_val is not None and 0 <= left_val <= 100:
             skills[left] = left_val
-
         right = skill_name(txt(rr, 16), txt(rr, 17))
-        right_val = num(rr, 25, None)  # Y：合計
+        right_val = num(rr, 25, None)
         if right and right_val is not None and 0 <= right_val <= 100:
             skills[right] = right_val
 
+    # Weapons.
+    weapon_lines=[]
+    for rr in section_rows('武器(', '調查員背景故事', 2):
+        wname=txt(rr,1)
+        if not wname:
+            continue
+        parts=[wname]
+        for label,val in [('技能',txt(rr,7)),('%',txt(rr,11)),('傷害',(txt(rr,12)+((' '+txt(rr,14)) if txt(rr,14) else '')).strip()),('範圍',txt(rr,16)),('次數',txt(rr,20)),('彈數',txt(rr,22)),('故障',txt(rr,25))]:
+            if val:
+                parts.append(f'{label}:{val}')
+        weapon_lines.append('｜'.join(parts))
+    weapons='\n'.join(weapon_lines)
+
+    # Background blocks.
+    def background_value(label, label_col, value_col):
+        rr,_=find_row(label,cols=(label_col,),start=80,end_row=min(len(rows),140))
+        return txt(rr,value_col) if rr else ''
+
+    appearance_desc=background_value('形象描述',1,3)
+    personality=background_value('性格特徵',13,16)
+    ideology=background_value('思想/信念',1,3)
+    scars=background_value('傷勢及傷痕',13,16)
+    significant_person=background_value('重要之人及理由',1,3)
+    phobias=background_value('恐懼症及狂躁症',13,16)
+    meaningful_place=background_value('意義非凡之地',1,3)
+    treasured_item=background_value('寶貴之物',13,16)
+    anchor=background_value('心靈支柱',8,11)
+    experience_pack=background_value('經驗包',8,11)
+    backstory=background_value('生平故事',8,11)
+
+    # Inventory.
+    inventory_items=[]
+    for rr in section_rows('隨身物品', '遭遇的超自然事物', 1):
+        for cc in (1,6,12,17,22):
+            v=txt(rr,cc)
+            if v:
+                inventory_items.append(v)
+    inventory='\n'.join(dict.fromkeys(inventory_items))
+
+    # Adventure history.
+    adventure_lines=[]
+    for rr in section_rows('遭遇的超自然事物', '調查員同伴及關係人', 2):
+        date=txt(rr,1)
+        if not date or date.startswith('例:') or date.startswith('例：'):
+            continue
+        vals=[date,txt(rr,3),txt(rr,8),txt(rr,11),txt(rr,14)]
+        adventure_lines.append('｜'.join(v for v in vals if v))
+    adventures='\n'.join(adventure_lines)
+
+    # Contacts.
+    contact_lines=[]
+    for rr in section_rows('調查員同伴及關係人', '咒文', 2):
+        n=txt(rr,1)
+        if not n:
+            continue
+        vals=[n,txt(rr,3),txt(rr,6),txt(rr,20),txt(rr,24)]
+        contact_lines.append('｜'.join(v for v in vals if v))
+    contacts='\n'.join(contact_lines)
+
+    # Spells.
+    spell_lines=[]
+    for rr in section_rows('咒文', '第三類接觸', 2):
+        n=txt(rr,1)
+        if not n:
+            continue
+        vals=[n,txt(rr,5),txt(rr,8),txt(rr,11),txt(rr,20),txt(rr,25)]
+        spell_lines.append('｜'.join(v for v in vals if v))
+    spells='\n'.join(spell_lines)
+
+    # Mythos / supernatural contacts.
+    supernatural_lines=[]
+    for rr in section_rows('第三類接觸', None, 2):
+        n=txt(rr,1)
+        if not n or n.startswith('例:') or n.startswith('例：'):
+            continue
+        vals=[n,txt(rr,5),txt(rr,11),txt(rr,15),txt(rr,20)]
+        supernatural_lines.append('｜'.join(v for v in vals if v))
+    supernatural='\n'.join(supernatural_lines)
+
     ch = blank_char()
     ch.update({
-        'name': name,
-        'occupation': occupation,
-        'age': age,
-        'attrs': attrs,
-        'hp': hp,
-        'mp': mp,
-        'san': san,
-        'luck': luck or 50,
+        'name': name, 'occupation': occupation, 'age': age, 'gender': gender,
+        'position': position, 'birthplace': birthplace, 'residence': residence,
+        'education': education, 'sheet_player': sheet_player, 'traits': traits,
+        'occupation_notes': occupation_notes,
+        'attrs': attrs, 'hp': hp, 'mp': mp, 'san': san, 'luck': luck or 50,
+        'mov': mov, 'build': build, 'db': db, 'inspiration': inspiration, 'knowledge': knowledge,
         'skills': skills or dict(DEFAULT_SKILLS),
+        'currency': currency, 'living_standard': living_standard, 'cash': cash,
+        'spending_level': spending_level, 'assets': assets, 'asset_details': asset_details,
+        'appearance_desc': appearance_desc, 'personality': personality, 'ideology': ideology,
+        'scars': scars, 'significant_person': significant_person, 'phobias': phobias,
+        'meaningful_place': meaningful_place, 'treasured_item': treasured_item,
+        'anchor': anchor, 'experience_pack': experience_pack, 'backstory': backstory,
+        'inventory': inventory, 'weapons': weapons, 'adventures': adventures,
+        'contacts': contacts, 'spells': spells, 'supernatural': supernatural,
         'source': 'Google Sheets / CoC7 V3'
     })
     return ch
@@ -600,9 +742,9 @@ def fetch_google_sheet(url):
 class Create(BaseModel):
     name: str = '未命名房間'; scenario: str = '自由跑團'; limit: int = 4; kp_name: str = 'KP'
 class Join(BaseModel):
-    code: str; name: str
+    code: str; name: str; resume_key: Optional[str]=None
 class JoinKp(BaseModel):
-    code: str; name: str; invite: str
+    code: str; name: str; invite: str; resume_key: Optional[str]=None
 class Token(BaseModel): token: str
 class ChatIn(Token): text: str
 class RollIn(Token): label: str='d100'; target: Optional[int]=None; mode: str='normal'; difficulty: str='normal'; hidden: bool=False
@@ -614,6 +756,7 @@ class ClueIn(Token): text: str; visibility: str='public'; target: Optional[str]=
 class NoteIn(Token): text: str=''
 class CoKpIn(Token): pid: str; enabled: bool
 class KickIn(Token): pid: str
+class DeleteCharIn(Token): pid: str
 class RenameIn(Token): name: str; pid: Optional[str]=None
 class ImportIn(Token): pid: str; url: Optional[str]=None; text: Optional[str]=None
 
@@ -625,7 +768,7 @@ def home():
 def home_head():
     return HTMLResponse('', headers={'Cache-Control':'no-store, max-age=0'})
 @app.get('/health')
-def health(): return {'ok':1,'rooms':len(rooms),'version':'v8.13'}
+def health(): return {'ok':1,'rooms':len(rooms),'version':'v8.14'}
 
 @app.post('/api/create')
 def create(x: Create):
@@ -641,10 +784,18 @@ def join(x: Join):
     r=rooms.get(x.code.upper().strip())
     if not r: raise HTTPException(404,'找不到房間')
     if r['ended']: raise HTTPException(409,'房間已結束')
+    name=(x.name or '訪客').strip()[:30] or '訪客'
+    if x.resume_key:
+        p=next((p for p in r['ps'] if not p.get('co_kp') and p.get('resume_key') and secrets.compare_digest(str(p['resume_key']),str(x.resume_key))),None)
+        if p:
+            r['chat'].append({'who':'系統','text':p['name']+' 重新連線','kind':'system'})
+            return {'code':r['code'],'token':p['token'],'resume_key':p['resume_key'],'name':p['name'],'role':'player','resumed':True}
+    if any(not p.get('co_kp') and p.get('name','').casefold()==name.casefold() for p in r['ps']):
+        raise HTTPException(409,'這個名字已在房間內，請用原本裝置重新進入，避免產生重複角色卡')
     if investigator_count(r) >= r['limit']: raise HTTPException(409,'房間已滿')
-    p={'id':secrets.token_hex(5),'token':secrets.token_urlsafe(24),'name':x.name.strip() or '訪客','co_kp':False,'npc':False,'char':blank_char()}
+    p={'id':secrets.token_hex(5),'token':secrets.token_urlsafe(24),'resume_key':secrets.token_urlsafe(18),'name':name,'co_kp':False,'npc':False,'char':blank_char()}
     r['ps'].append(p); r['chat'].append({'who':'系統','text':p['name']+' 加入房間','kind':'system'})
-    return {'code':r['code'],'token':p['token']}
+    return {'code':r['code'],'token':p['token'],'resume_key':p['resume_key'],'name':p['name'],'role':'player'}
 
 @app.post('/api/join-kp')
 def join_kp(x: JoinKp):
@@ -653,9 +804,17 @@ def join_kp(x: JoinKp):
     if r['ended']: raise HTTPException(409,'房間已結束')
     if not secrets.compare_digest(str(x.invite or ''), str(r.get('kp_invite',''))):
         raise HTTPException(403,'共同 KP 邀請無效')
-    p={'id':secrets.token_hex(5),'token':secrets.token_urlsafe(24),'name':x.name.strip() or '共同KP','co_kp':True,'npc':False,'char':blank_char()}
+    name=(x.name or '共同KP').strip()[:30] or '共同KP'
+    if x.resume_key:
+        p=next((p for p in r['ps'] if p.get('co_kp') and p.get('resume_key') and secrets.compare_digest(str(p['resume_key']),str(x.resume_key))),None)
+        if p:
+            r['chat'].append({'who':'系統','text':p['name']+' 重新連線','kind':'system'})
+            return {'code':r['code'],'token':p['token'],'resume_key':p['resume_key'],'name':p['name'],'role':'kp','resumed':True}
+    if any(p.get('co_kp') and p.get('name','').casefold()==name.casefold() for p in r['ps']):
+        raise HTTPException(409,'這個共同 KP 名稱已在房間內，請用原本裝置重新進入')
+    p={'id':secrets.token_hex(5),'token':secrets.token_urlsafe(24),'resume_key':secrets.token_urlsafe(18),'name':name,'co_kp':True,'npc':False,'char':blank_char()}
     r['ps'].append(p); r['chat'].append({'who':'系統','text':p['name']+' 以共同 KP 身分加入房間','kind':'system'})
-    return {'code':r['code'],'token':p['token']}
+    return {'code':r['code'],'token':p['token'],'resume_key':p['resume_key'],'name':p['name'],'role':'kp'}
 
 @app.get('/api/room/{c}')
 def state(c:str, token:str):
@@ -723,12 +882,29 @@ def save_char(c:str,x:CharIn):
     if not p: raise HTTPException(404,'找不到角色')
     if not is_kp(role) and aid != x.pid: raise HTTPException(403,'不能修改別人角色')
     ch=blank_char(); data=x.char or {}
-    ch.update({k:data[k] for k in ['name','occupation','age','inventory','public_notes','private_notes','visibility','source'] if k in data})
+    text_fields=['name','occupation','age','gender','position','birthplace','residence','education','sheet_player','traits','occupation_notes',
+                 'build','db','currency','living_standard','cash','spending_level','assets','asset_details',
+                 'appearance_desc','personality','ideology','scars','significant_person','phobias','meaningful_place','treasured_item',
+                 'anchor','experience_pack','backstory','inventory','weapons','adventures','contacts','spells','supernatural',
+                 'public_notes','private_notes','visibility','source']
+    ch.update({k:str(data[k])[:12000] for k in text_fields if k in data})
     if isinstance(data.get('attrs'),dict): ch['attrs']={k:safe_int(data['attrs'].get(k),0) for k in ch['attrs']}
-    if isinstance(data.get('skills'),dict): ch['skills']={str(k)[:40]:max(0,min(100,safe_int(v,0))) for k,v in data['skills'].items() if str(k).strip()}
-    for k in ['hp','mp','san','luck']: ch[k]=safe_int(data.get(k),ch[k])
+    if isinstance(data.get('skills'),dict): ch['skills']={str(k)[:60]:max(0,min(100,safe_int(v,0))) for k,v in data['skills'].items() if str(k).strip()}
+    for k in ['hp','mp','san','luck','mov','inspiration','knowledge']: ch[k]=safe_int(data.get(k),ch[k])
     if ch['visibility'] not in ('public','kp_only'): ch['visibility']='kp_only'
     p['char']=ch; return {'ok':1}
+
+@app.post('/api/room/{c}/delete-char')
+def delete_char(c:str,x:DeleteCharIn):
+    r=rooms.get(c.upper())
+    if not r: raise HTTPException(404,'找不到房間')
+    role,_=auth(r,x.token)
+    if not is_kp(role): raise HTTPException(403,'只有 KP 可以刪除角色卡')
+    p=next((p for p in r['ps'] if p['id']==x.pid),None)
+    if not p: raise HTTPException(404,'找不到玩家')
+    old_name=p.get('char',{}).get('name') or '未命名角色'
+    p['char']=blank_char()
+    return {'ok':1,'deleted':old_name}
 
 @app.post('/api/room/{c}/import-sheet')
 def import_sheet(c:str,x:ImportIn):
@@ -857,6 +1033,11 @@ def selftest():
     try:
         a=create(Create(name='QA',scenario='營火',limit=1,kp_name='守密人魚')); c=a['code']; assert rooms[c]['owner_name']=='守密人魚'; checks.append('create')
         g=join(Join(code=c,name='A')); checks.append('join')
+        resumed=join(Join(code=c,name='A',resume_key=g['resume_key'])); assert resumed['token']==g['token'] and len(rooms[c]['ps'])==1; checks.append('resume_join')
+        try:
+            join(Join(code=c,name='A')); raise AssertionError('duplicate name accepted')
+        except HTTPException as e:
+            assert e.status_code==409; checks.append('duplicate_guard')
         try:
             join(Join(code=c,name='B')); raise AssertionError('capacity failed')
         except HTTPException as e:
@@ -939,12 +1120,15 @@ def selftest():
         assert parsed['hp']==11 and parsed['mp']==14 and parsed['san']==60
         assert parsed['skills']['心理學']==50 and parsed['skills']['藝術／手藝：美術']==5 and parsed['skills']['格鬥：鬥毆']==25
         assert '生存' not in parsed['skills'] and '生存:' not in parsed['skills']
+        assert parsed['gender']=='' and parsed['mov']==0
         checks.append('sheet_parse_v3')
         # room-management flow
         m=create(Create(name='MGMT',scenario='自由跑團',limit=3)); mc=m['code']
         ma=join(Join(code=mc,name='M-A')); mb=join(Join(code=mc,name='M-B'))
         pma=next(p['id'] for p in rooms[mc]['ps'] if p['token']==ma['token'])
         pmb=next(p['id'] for p in rooms[mc]['ps'] if p['token']==mb['token'])
+        tmp=blank_char(); tmp['name']='待刪角色'; tmp['backstory']='秘密故事'; save_char(mc,CharIn(token=m['token'],pid=pmb,char=tmp))
+        delete_char(mc,DeleteCharIn(token=m['token'],pid=pmb)); assert rooms[mc]['ps'][1]['char']['name']=='' and rooms[mc]['ps'][1]['char']['backstory']==''; checks.append('char_delete')
         co_kp(mc,CoKpIn(token=m['token'],pid=pma,enabled=True)); checks.append('mgmt_promote')
         kick_player(mc,KickIn(token=ma['token'],pid=pmb)); assert len(rooms[mc]['ps'])==1; checks.append('mgmt_kick')
         leave_room(mc,Token(token=ma['token'])); assert len(rooms[mc]['ps'])==0; checks.append('mgmt_leave')
@@ -958,7 +1142,7 @@ def selftest():
             chat(c,ChatIn(token=g['token'],text='x')); raise AssertionError('end lock failed')
         except HTTPException as e:
             assert e.status_code==409; checks.append('end_lock')
-        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.13'}
+        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.14'}
     except Exception as e:
         return JSONResponse({'ok':False,'checks':checks,'error':repr(e)},status_code=500)
     finally:
@@ -976,7 +1160,7 @@ HTML = r'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta
 :root{--bg:#07110d;--card:#0e1d16;--line:#294b3a;--green:#7dd3a7;--muted:#9db1a5;--red:#8a3030;--gold:#d6bc7a}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#eef7f0;font-family:system-ui,-apple-system,sans-serif}.w{max-width:1100px;margin:auto;padding:18px 14px 90px}.hero{text-align:center;padding:22px 0}.grid,.room{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:14px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;margin:4px 0 9px;padding:10px;border-radius:10px;border:1px solid #315642;background:#09140f;color:#fff}textarea{min-height:90px}button{padding:10px 13px;border:0;border-radius:10px;background:var(--green);color:#062015;font-weight:800;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}.alt{background:#173629;color:#fff}.bad{background:var(--red);color:#fff}.gold{background:var(--gold);color:#211907}.hide{display:none!important}.chat{height:48vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px}.m{margin:0 0 9px;white-space:pre-wrap}.who{color:var(--green);font-weight:800}.row{display:flex;gap:8px}.row>*{flex:1}.small{color:var(--muted);font-size:13px}.pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:5px 9px;margin:3px}.tabs{display:flex;gap:7px;margin:10px 0;flex-wrap:wrap}.tabs button{background:#173629;color:#fff}.sec{display:none}.sec.on{display:block}.bottom{display:none;position:fixed;bottom:0;left:0;right:0;background:#0b1812;padding:8px;grid-template-columns:repeat(2,1fr);gap:8px;z-index:5}.attrgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.skillgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}.clue{padding:9px;border-left:3px solid var(--green);background:#0a1711;margin:7px 0}.modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;padding:15px;z-index:20}.modalbox{max-width:760px;max-height:85vh;overflow:auto;background:#102219;border:1px solid var(--line);border-radius:18px;padding:18px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.code{font-family:ui-monospace,monospace;font-size:18px;color:var(--gold)}details{border:1px solid var(--line);border-radius:10px;padding:9px;margin:8px 0}.cmdrow{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #1f3a2c;padding:8px 0}.cmdrow code{color:var(--gold);font-weight:800}.quickgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.quickgrid button{background:#173629;color:#fff;text-align:left}a{color:var(--green)}
 @media(max-width:720px){.grid,.room{grid-template-columns:1fr}.bottom{display:grid}.desktop{display:none}.attrgrid{grid-template-columns:repeat(2,1fr)}.skillgrid{grid-template-columns:1fr}.chat{height:45vh}}
 </style></head><body><div class="w">
-<section id="home"><div class="hero"><h1>克蘇魯調查局</h1><div class="small">CoC 7 文字跑團｜訪客免帳號 · v8.13</div><button class="alt" onclick="rules()">規則／骰娘指令</button></div><div class="grid"><div class="card"><h2>KP 開房</h2><label>KP 名稱</label><input id="kpn" placeholder="例如：阿魚"><label>房間名稱</label><input id="rn" placeholder="例如：週五克蘇魯團"><label>劇本</label><select id="sc"><option>自由跑團</option><option>營火</option></select><label>調查員人數上限</label><input id="lim" type="number" min="1" max="50" value="4"><button onclick="createRoom()">建立房間</button></div><div class="card"><h2>訪客加入</h2><label>暱稱</label><input id="gn" placeholder="你的暱稱"><label>房號</label><input id="rc" maxlength="6"><button onclick="joinRoom()">加入房間</button></div><div class="card"><h2>共同 KP 加入</h2><div class="small">通常由房主傳「共同 KP 邀請連結」給你。</div><label>暱稱</label><input id="gkn" placeholder="KP 暱稱"><label>房號</label><input id="gkc" maxlength="6"><label>共同 KP 邀請碼</label><input id="gki" placeholder="邀請連結會自動填入"><button onclick="joinKpRoom()">以共同 KP 加入</button></div></div><div id="err"></div></section>
+<section id="home"><div class="hero"><h1>克蘇魯調查局</h1><div class="small">CoC 7 文字跑團｜訪客免帳號 · v8.14</div><button class="alt" onclick="rules()">規則／骰娘指令</button></div><div class="grid"><div class="card"><h2>KP 開房</h2><label>KP 名稱</label><input id="kpn" placeholder="例如：阿魚"><label>房間名稱</label><input id="rn" placeholder="例如：週五克蘇魯團"><label>劇本</label><select id="sc"><option>自由跑團</option><option>營火</option></select><label>調查員人數上限</label><input id="lim" type="number" min="1" max="50" value="4"><button onclick="createRoom()">建立房間</button></div><div class="card"><h2>訪客加入</h2><label>暱稱</label><input id="gn" placeholder="你的暱稱"><label>房號</label><input id="rc" maxlength="6"><button onclick="joinRoom()">加入房間</button></div><div class="card"><h2>共同 KP 加入</h2><div class="small">通常由房主傳「共同 KP 邀請連結」給你。</div><label>暱稱</label><input id="gkn" placeholder="KP 暱稱"><label>房號</label><input id="gkc" maxlength="6"><label>共同 KP 邀請碼</label><input id="gki" placeholder="邀請連結會自動填入"><button onclick="joinKpRoom()">以共同 KP 加入</button></div></div><div id="err"></div></section>
 <section id="game" class="hide"><div class="topbar"><div><h2 id="title"></h2><span class="pill" id="scene"></span><span class="pill" id="count"></span><span class="pill" id="role"></span></div><div><div class="code" id="roomcode"></div><button class="alt" onclick="copyCode()">複製房號</button> <button class="alt" onclick="copyInvite()">複製玩家邀請</button> <button id="kpinvitebtn" class="alt hide" onclick="copyKpInvite()">複製共同 KP 邀請</button> <button id="kpconsolebtn" class="alt kp hide" onclick="tab('kp')">KP 主持台</button> <button class="alt" onclick="toggleNameEdit()">更改名字</button> <button class="gold" onclick="rules()">規則</button> <button id="leavebtn" class="bad" onclick="leaveRoom()">離開房間</button> <button id="disbandbtn" class="bad hide" onclick="disbandRoom()">解散房間</button></div></div><div id="nameedit" class="card hide"><label>房間顯示名稱</label><div class="row"><input id="selfname" maxlength="30" placeholder="輸入新名稱"><button onclick="renameSelf()">儲存名稱</button><button class="alt" onclick="toggleNameEdit(false)">取消</button></div><div class="small">只修改你在房間與聊天中的顯示名稱；角色卡內的角色名稱不會一起改。</div></div><div id="ended" class="card hide">房間已結束，聊天、擲骰與角色修改已停用。</div><div class="tabs desktop"><button onclick="tab('story')">故事</button><button onclick="tab('chars')">角色</button><button onclick="tab('dice')">擲骰</button><button class="kp" onclick="tab('kp')">KP 主持台</button></div><div class="room"><main>
 <div id="story" class="sec on"><div id="chat" class="chat"></div><div class="row"><input id="ci" placeholder="留言或輸入骰子指令，例如 Ccyc、Cc>70、3 1d6+1d20" onkeydown="if(event.key==='Enter')send()"><button id="sendbtn" onclick="send()">送出</button></div></div>
 <div id="chars" class="sec"><div class="card"><h2>角色卡</h2><div class="small">角色卡預設「僅本人＋KP」。本人可改成全房公開；私人筆記永遠只有本人與 KP 看得到。</div><div id="players"></div></div></div>
@@ -986,9 +1170,9 @@ HTML = r'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta
 <div id="bottom" class="bottom hide"><button onclick="tab('story')">故事</button><button onclick="tab('chars')">角色</button></div><div id="modal" class="modal hide" onclick="if(event.target.id==='modal')closeRules()"><div class="modalbox"><button style="float:right" onclick="closeRules()">關閉</button><h2>骰娘規則</h2><h3>CoC 7 指令</h3><div class="cmdrow"><span><code>Ccyc</code>｜你的創角骰組：7 組 3D6×5、4 組 (2D6+6)×5、2 組 3D6×5</span><button onclick="copyCmd('Ccyc')">複製</button></div><div class="cmdrow"><span><code>Cc 60 魅惑</code>｜百分骰檢定；數值後可直接加技能／用途名稱</span><button onclick="copyCmd('Cc 60 魅惑')">複製</button></div><div class="cmdrow"><span><code>Cc1 60 魅惑</code> / <code>Cc2 60 魅惑</code>｜1／2 顆獎勵骰</span><button onclick="copyCmd('Cc1 60 魅惑')">複製</button></div><div class="cmdrow"><span><code>Ccn1 60 魅惑</code> / <code>Ccn2 60 魅惑</code>｜1／2 顆懲罰骰</span><button onclick="copyCmd('Ccn1 60 魅惑')">複製</button></div><div class="cmdrow"><span><code>Cc&gt;80 魅惑</code>｜成長比較；數值後可加技能名稱，可用 &gt;、&lt;、&gt;=、&lt;=、=</span><button onclick="copyCmd('Cc>80 魅惑')">複製</button></div><h3>基本骰式</h3><div class="cmdrow"><span><code>1D3+1</code>｜一般骰式</span><button onclick="copyCmd('1D3+1')">複製</button></div><div class="cmdrow"><span><code>3 1D6+1D20</code>｜重複 3 次擲同一骰式，最多 30 次</span><button onclick="copyCmd('3 1D6+1D20')">複製</button></div><div class="cmdrow"><span><code>1D100 偵查</code>｜骰式後可附文字註記</span><button onclick="copyCmd('1D100 偵查')">複製</button></div><div class="cmdrow"><span><code>3D6kh</code> / <code>3D6kh2</code>｜保留最高 1／2 顆；亦支援 kl、dh、dl</span><button onclick="copyCmd('3D6kh')">複製</button></div><h3>D66</h3><div class="cmdrow"><span><code>D66</code>｜兩顆 D6 組成兩位數</span><button onclick="copyCmd('D66')">複製</button></div><div class="cmdrow"><span><code>D66s</code>｜較小數字在前；<code>D66n</code>｜較大數字在前</span><button onclick="copyCmd('D66s')">複製</button></div><p class="small">按「複製」後，指令會帶到聊天輸入框；按送出即可執行。</p></div></div>
 <script>
 let S={code:'',token:'',st:null,timer:null};let lastChatKey='',forceChatBottom=true,lastPlayersKey='',noteSaveTimer=null,noteDirty=false;const $=x=>document.getElementById(x);const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));async function api(u,o={}){let r=await fetch(u,{headers:{'Content-Type':'application/json'},...o}),d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail||'操作失敗');return d}function showErr(e){$('err').innerHTML='<div class="card">⚠️ '+esc(e)+'</div>'}function toggleNameEdit(force){let box=$('nameedit');let open=typeof force==='boolean'?force:box.classList.contains('hide');box.classList.toggle('hide',!open);if(open){$('selfname').value=(S.st&&S.st.self_name)||'';setTimeout(()=>{$('selfname').focus();$('selfname').select()},30)}}async function renameSelf(){let name=$('selfname').value.trim();if(!name)return notify('名稱不可空白',true);try{let d=await api('/api/room/'+S.code+'/rename',{method:'POST',body:JSON.stringify({token:S.token,name:name})});toggleNameEdit(false);notify('✓ 名稱已改為 '+d.name);await refresh()}catch(e){notify(e.message,true)}}function notify(msg,bad=false){let toast=document.getElementById('apptoast');if(!toast){toast=document.createElement('div');toast.id='apptoast';toast.style.cssText='position:fixed;left:50%;bottom:78px;transform:translateX(-50%);max-width:88vw;background:#173629;color:#fff;border:1px solid #315642;padding:10px 14px;border-radius:999px;z-index:120;font-weight:800;box-shadow:0 6px 24px #0008;transition:.2s;text-align:center';document.body.appendChild(toast)}toast.style.background=bad?'#6f2b2b':'#173629';toast.textContent=msg;toast.style.opacity='1';clearTimeout(window.__appToastTimer);window.__appToastTimer=setTimeout(()=>{toast.style.opacity='0'},1800)}function rules(){$('modal').classList.remove('hide')}function closeRules(){$('modal').classList.add('hide')}async function copyCmd(t){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(t)}else{let x=document.createElement('textarea');x.value=t;x.style.position='fixed';x.style.opacity='0';document.body.appendChild(x);x.focus();x.select();document.execCommand('copy');x.remove()}}catch(e){}closeRules();if(S.code){tab('story');$('ci').value=t;setTimeout(()=>{$('ci').focus();try{$('ci').setSelectionRange(t.length,t.length)}catch(e){}},60)}}
-async function createRoom(){try{let d=await api('/api/create',{method:'POST',body:JSON.stringify({name:$('rn').value||'未命名房間',scenario:$('sc').value,limit:+$('lim').value,kp_name:$('kpn').value||'KP'})});enter(d)}catch(e){showErr(e.message)}}async function joinRoom(){try{let d=await api('/api/join',{method:'POST',body:JSON.stringify({code:$('rc').value.toUpperCase(),name:$('gn').value||'訪客'})});enter(d)}catch(e){showErr(e.message)}}async function joinKpRoom(){try{let d=await api('/api/join-kp',{method:'POST',body:JSON.stringify({code:$('gkc').value.toUpperCase(),name:$('gkn').value||'共同KP',invite:$('gki').value.trim()})});enter(d)}catch(e){showErr(e.message)}}function enter(d){S.code=d.code;S.token=d.token;localStorage.removeItem('coc-v8');localStorage.setItem('coc-v8',JSON.stringify(d));$('home').classList.add('hide');$('game').classList.remove('hide');$('bottom').classList.remove('hide');if(S.timer)clearInterval(S.timer);refresh();S.timer=setInterval(refresh,1400)}function resetHome(msg=''){localStorage.removeItem('coc-v8');S={code:'',token:'',st:null,timer:null};$('game').classList.add('hide');$('bottom').classList.add('hide');$('home').classList.remove('hide');if(msg)showErr(msg)}async function refresh(){if(!S.code)return;try{S.st=await api('/api/room/'+S.code+'?token='+encodeURIComponent(S.token));render()}catch(e){resetHome('你已離開、被移出，或房間已解散。')}}
-function renderChat(items){let el=$('chat');let nearBottom=(el.scrollHeight-el.scrollTop-el.clientHeight)<80;let oldTop=el.scrollTop;let key=items.length+'|'+(items.length?(items[items.length-1].who||'')+'|'+(items[items.length-1].text||''):'');if(key!==lastChatKey){el.innerHTML=items.map(m=>'<div class="m"><span class="who">'+esc(m.who)+'</span> '+esc(m.text)+'</div>').join('');lastChatKey=key;requestAnimationFrame(()=>{if(forceChatBottom||nearBottom){el.scrollTop=el.scrollHeight}else{el.scrollTop=oldTop}forceChatBottom=false})}}function renderPlayers(players,role,aid,ended){let key=JSON.stringify({players:players,role:role,aid:aid,ended:ended});let active=document.activeElement;let editing=!!(active&&active.closest&&active.closest('#chars'));if(key!==lastPlayersKey&&!editing){$('players').innerHTML=players.map(p=>charCard(p,role,aid,ended)).join('');lastPlayersKey=key}}function render(){let s=S.st,isKP=['owner','kp'].includes(s.role);$('title').textContent=s.name;$('roomcode').textContent='房號 '+s.code;$('scene').textContent='場景：'+s.scene;$('count').textContent='調查員 '+s.count+'/'+s.limit;$('role').textContent=s.role==='owner'?(s.self_name+'・房主 KP'):s.role==='kp'?(s.self_name+'・共同 KP'):(s.self_name+'・玩家');if($('selfname')&&document.activeElement!==$('selfname'))$('selfname').value=s.self_name||'';$('leavebtn').classList.toggle('hide',s.role==='owner');$('disbandbtn').classList.toggle('hide',s.role!=='owner');$('kpdisband').classList.toggle('hide',s.role!=='owner');$('kpinvitebtn').classList.toggle('hide',s.role!=='owner');$('kpconsolebtn').classList.toggle('hide',!isKP);document.querySelectorAll('.kp').forEach(x=>x.classList.toggle('hide',!isKP));$('ended').classList.toggle('hide',!s.ended);$('ci').disabled=s.ended;$('sendbtn').disabled=s.ended;$('rollbtn').disabled=s.ended;renderChat(s.chat);$('clues').innerHTML=s.clues.length?s.clues.map(x=>'<div class="clue"><div>'+esc(x.text)+'</div><div class="small">'+(x.visibility==='public'?'🌐 全員可見':x.visibility==='kp'?'🔒 僅 KP':'👤 指定：'+esc(x.target_name||'玩家'))+(x.author?' · 發布：'+esc(x.author):'')+'</div></div>').join(''):'尚無可見線索';$('side').innerHTML='<div><b>'+esc(s.owner_name)+'</b> <span class="pill">房主KP</span></div><br>'+s.players.map(p=>'<div><b>'+esc(p.name)+'</b> '+(p.co_kp?'<span class="pill">共同KP</span>':'<span class="pill">玩家</span>')+'<div class="small">'+esc(p.char_name||'未設定角色')+'</div></div><br>').join('');renderPlayers(s.players,s.role,s.aid,s.ended);$('nl').value=s.limit;$('ss').innerHTML=s.scenes.map(x=>'<option '+(x===s.scene?'selected':'')+'>'+esc(x)+'</option>').join('');let ct=$('ct'),ctValue=ct?ct.value:'';let ctHtml='<option value="">選擇調查員</option>'+s.players.filter(p=>!p.co_kp).map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');if(ct&&ct.innerHTML!==ctHtml){ct.innerHTML=ctHtml;if([...ct.options].some(o=>o.value===ctValue))ct.value=ctValue}if(isKP&&$('nt')&&document.activeElement!==$('nt')&&!noteDirty)$('nt').value=s.note||'';if($('ownernamebox'))$('ownernamebox').classList.toggle('hide',s.role!=='owner');if(s.role==='owner'&&$('ownername'))$('ownername').value=s.owner_name||'KP';$('kokp').innerHTML=isKP?'<h3>玩家管理</h3>'+s.players.map(p=>'<div class="row"><span>'+esc(p.name)+(p.co_kp?'（共同KP）':'')+'</span>'+(s.role==='owner'?'<button class="alt" onclick="setCoKp(\''+p.id+'\','+(!p.co_kp)+')">'+(p.co_kp?'取消共同KP':'設為共同KP')+'</button>':'')+((s.role==='owner'||!p.co_kp)?'<button class="bad" onclick="kickPlayer(\''+p.id+'\',\''+esc(p.name).replace(/&#39;/g,"\\'")+'\')">踢出</button>':'')+'</div>').join(''):''}
-function charCard(p,role,aid,ended){if(p.char_hidden)return '<div class="card"><b>'+esc(p.name)+'</b><p>🔒 角色卡已設為私密，只有本人與 KP 可查看。</p></div>';let c=p.char||{},can=!ended&&(['owner','kp'].includes(role)||aid===p.id);let attrs=c.attrs||{},skills=c.skills||{};let skillText=Object.entries(skills).map(([k,v])=>k+'='+v).join('\n');return '<div class="card"><h3>'+esc(p.name)+' 的角色卡</h3><label>房間顯示名稱</label><input id="dn'+p.id+'" value="'+esc(p.name)+'" '+(can?'':'disabled')+'><label>角色名稱</label><input id="cn'+p.id+'" value="'+esc(c.name||'')+'" '+(can?'':'disabled')+'><label>職業</label><input id="co'+p.id+'" value="'+esc(c.occupation||'')+'" '+(can?'':'disabled')+'><label>年齡</label><input id="ca'+p.id+'" value="'+esc(c.age||'')+'" '+(can?'':'disabled')+'><div class="attrgrid">'+['STR','CON','SIZ','DEX','APP','INT','POW','EDU'].map(k=>'<label>'+k+'<input id="a'+k+p.id+'" type="number" value="'+(attrs[k]||0)+'" '+(can?'':'disabled')+'></label>').join('')+'</div><div class="row"><label>HP<input id="hp'+p.id+'" type="number" value="'+(c.hp??10)+'" '+(can?'':'disabled')+'></label><label>MP<input id="mp'+p.id+'" type="number" value="'+(c.mp??10)+'" '+(can?'':'disabled')+'></label><label>SAN<input id="san'+p.id+'" type="number" value="'+(c.san??50)+'" '+(can?'':'disabled')+'></label><label>幸運<input id="luck'+p.id+'" type="number" value="'+(c.luck??50)+'" '+(can?'':'disabled')+'></label></div><label>技能（每行 技能=數值）</label><textarea id="sk'+p.id+'" '+(can?'':'disabled')+'>'+esc(skillText)+'</textarea><label>隨身物品</label><textarea id="inv'+p.id+'" '+(can?'':'disabled')+'>'+esc(c.inventory||'')+'</textarea><label>公開備註</label><textarea id="pn'+p.id+'" '+(can?'':'disabled')+'>'+esc(c.public_notes||'')+'</textarea><label>私人備註（僅本人＋KP）</label><textarea id="pr'+p.id+'" '+(can?'':'disabled')+'>'+esc(c.private_notes||'')+'</textarea><label>角色卡可見範圍</label><select id="vis'+p.id+'" '+(can?'':'disabled')+'><option value="kp_only" '+(c.visibility!=='public'?'selected':'')+'>僅本人＋KP</option><option value="public" '+(c.visibility==='public'?'selected':'')+'>全房間公開</option></select>'+(can?'<button onclick="saveChar(\''+p.id+'\')">儲存角色卡</button><details><summary>匯入 CoC7 Google 試算表</summary><div class="small">支援你提供的「CoC7版自動計算人物卡V3」格式。連結需可檢視；私密表可改用複製 A1:Z150 後貼上。</div><input id="url'+p.id+'" placeholder="Google 試算表連結"><button class="alt" onclick="importSheet(\''+p.id+'\',\'url\')">讀取連結</button><textarea id="paste'+p.id+'" placeholder="或貼上試算表 A1:Z150 資料"></textarea><button class="alt" onclick="importSheet(\''+p.id+'\',\'text\')">讀取貼上資料</button></details>':'')+'</div>'}
-function parseSkills(t){let o={};t.split(/\n+/).forEach(l=>{let m=l.match(/^(.+?)[=:：]\s*(\d{1,3})\s*$/);if(m)o[m[1].trim()]=Math.max(0,Math.min(100,+m[2]))});return o}async function saveChar(id){try{let attrs={};['STR','CON','SIZ','DEX','APP','INT','POW','EDU'].forEach(k=>attrs[k]=+$('a'+k+id).value);let ch={name:$('cn'+id).value,occupation:$('co'+id).value,age:$('ca'+id).value,attrs,hp:+$('hp'+id).value,mp:+$('mp'+id).value,san:+$('san'+id).value,luck:+$('luck'+id).value,skills:parseSkills($('sk'+id).value),inventory:$('inv'+id).value,public_notes:$('pn'+id).value,private_notes:$('pr'+id).value,visibility:$('vis'+id).value,source:'manual'};await api('/api/room/'+S.code+'/rename',{method:'POST',body:JSON.stringify({token:S.token,pid:id,name:$('dn'+id).value||'未命名'})});await api('/api/room/'+S.code+'/char',{method:'POST',body:JSON.stringify({token:S.token,pid:id,char:ch})});if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();lastPlayersKey='';await refresh();notify('✓ 角色卡已儲存')}catch(e){notify(e.message,true)}}async function importSheet(id,kind){try{let body={token:S.token,pid:id};if(kind==='url')body.url=$('url'+id).value;else body.text=$('paste'+id).value;let d=await api('/api/room/'+S.code+'/import-sheet',{method:'POST',body:JSON.stringify(body)});applyPreview(id,d.preview);let n=Object.keys(d.preview.skills||{}).length;notify('✓ 已讀取人物卡：'+(d.preview.name||'未命名')+'，'+n+' 項技能')}catch(e){notify(e.message,true)}}function applyPreview(id,c){$('cn'+id).value=c.name||'';$('co'+id).value=c.occupation||'';$('ca'+id).value=c.age||'';Object.entries(c.attrs||{}).forEach(([k,v])=>{let e=$('a'+k+id);if(e)e.value=v});$('hp'+id).value=c.hp;$('mp'+id).value=c.mp;$('san'+id).value=c.san;$('luck'+id).value=c.luck;$('sk'+id).value=Object.entries(c.skills||{}).map(([k,v])=>k+'='+v).join('\n')}
+function resumeKey(code,role,name){try{let d=JSON.parse(localStorage.getItem('coc-resume-'+code+'-'+role)||'null');return d&&d.name===name?d.key:null}catch(e){return null}}function rememberResume(d){if(d.resume_key&&d.name&&d.role)localStorage.setItem('coc-resume-'+d.code+'-'+d.role,JSON.stringify({name:d.name,key:d.resume_key}))}async function createRoom(){try{let d=await api('/api/create',{method:'POST',body:JSON.stringify({name:$('rn').value||'未命名房間',scenario:$('sc').value,limit:+$('lim').value,kp_name:$('kpn').value||'KP'})});enter(d)}catch(e){showErr(e.message)}}async function joinRoom(){try{let code=$('rc').value.toUpperCase(),name=$('gn').value||'訪客';let d=await api('/api/join',{method:'POST',body:JSON.stringify({code:code,name:name,resume_key:resumeKey(code,'player',name)})});enter(d)}catch(e){showErr(e.message)}}async function joinKpRoom(){try{let code=$('gkc').value.toUpperCase(),name=$('gkn').value||'共同KP';let d=await api('/api/join-kp',{method:'POST',body:JSON.stringify({code:code,name:name,invite:$('gki').value.trim(),resume_key:resumeKey(code,'kp',name)})});enter(d)}catch(e){showErr(e.message)}}function enter(d){rememberResume(d);S.code=d.code;S.token=d.token;localStorage.removeItem('coc-v8');localStorage.setItem('coc-v8',JSON.stringify(d));$('home').classList.add('hide');$('game').classList.remove('hide');$('bottom').classList.remove('hide');if(S.timer)clearInterval(S.timer);refresh();S.timer=setInterval(refresh,1400)}function resetHome(msg=''){localStorage.removeItem('coc-v8');S={code:'',token:'',st:null,timer:null};$('game').classList.add('hide');$('bottom').classList.add('hide');$('home').classList.remove('hide');if(msg)showErr(msg)}async function refresh(){if(!S.code)return;try{S.st=await api('/api/room/'+S.code+'?token='+encodeURIComponent(S.token));render()}catch(e){resetHome('你已離開、被移出，或房間已解散。')}}
+function renderChat(items){let el=$('chat');let nearBottom=(el.scrollHeight-el.scrollTop-el.clientHeight)<80;let oldTop=el.scrollTop;let key=items.length+'|'+(items.length?(items[items.length-1].who||'')+'|'+(items[items.length-1].text||''):'');if(key!==lastChatKey){el.innerHTML=items.map(m=>'<div class="m"><span class="who">'+esc(m.who)+'</span> '+esc(m.text)+'</div>').join('');lastChatKey=key;requestAnimationFrame(()=>{if(forceChatBottom||nearBottom){el.scrollTop=el.scrollHeight}else{el.scrollTop=oldTop}forceChatBottom=false})}}function renderPlayers(players,role,aid,ended){let key=JSON.stringify({players:players,role:role,aid:aid,ended:ended});let active=document.activeElement;let editing=!!(active&&active.closest&&active.closest('#chars'));if(key!==lastPlayersKey&&!editing){$('players').innerHTML=players.map(p=>charCard(p,role,aid,ended)).join('');lastPlayersKey=key}}function render(){let s=S.st,isKP=['owner','kp'].includes(s.role);$('title').textContent=s.name;$('roomcode').textContent='房號 '+s.code;$('scene').textContent='場景：'+s.scene;$('count').textContent='調查員 '+s.count+'/'+s.limit;$('role').textContent=s.role==='owner'?(s.self_name+'・房主 KP'):s.role==='kp'?(s.self_name+'・共同 KP'):(s.self_name+'・玩家');if($('selfname')&&document.activeElement!==$('selfname'))$('selfname').value=s.self_name||'';$('leavebtn').classList.toggle('hide',s.role==='owner');$('disbandbtn').classList.toggle('hide',s.role!=='owner');$('kpdisband').classList.toggle('hide',s.role!=='owner');$('kpinvitebtn').classList.toggle('hide',s.role!=='owner');$('kpconsolebtn').classList.toggle('hide',!isKP);document.querySelectorAll('.kp').forEach(x=>x.classList.toggle('hide',!isKP));$('ended').classList.toggle('hide',!s.ended);$('ci').disabled=s.ended;$('sendbtn').disabled=s.ended;$('rollbtn').disabled=s.ended;renderChat(s.chat);$('clues').innerHTML=s.clues.length?s.clues.map(x=>'<div class="clue"><div>'+esc(x.text)+'</div><div class="small">'+(x.visibility==='public'?'🌐 全員可見':x.visibility==='kp'?'🔒 僅 KP':'👤 指定：'+esc(x.target_name||'玩家'))+(x.author?' · 發布：'+esc(x.author):'')+'</div></div>').join(''):'尚無可見線索';$('side').innerHTML='<div><b>'+esc(s.owner_name)+'</b> <span class="pill">房主KP</span></div><br>'+s.players.map(p=>'<div><b>'+esc(p.name)+'</b> '+(p.co_kp?'<span class="pill">共同KP</span>':'<span class="pill">玩家</span>')+'<div class="small">'+esc(p.char_name||'未設定角色')+'</div></div><br>').join('');renderPlayers(s.players,s.role,s.aid,s.ended);$('nl').value=s.limit;$('ss').innerHTML=s.scenes.map(x=>'<option '+(x===s.scene?'selected':'')+'>'+esc(x)+'</option>').join('');let ct=$('ct'),ctValue=ct?ct.value:'';let ctHtml='<option value="">選擇調查員</option>'+s.players.filter(p=>!p.co_kp).map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');if(ct&&ct.innerHTML!==ctHtml){ct.innerHTML=ctHtml;if([...ct.options].some(o=>o.value===ctValue))ct.value=ctValue}if(isKP&&$('nt')&&document.activeElement!==$('nt')&&!noteDirty)$('nt').value=s.note||'';if($('ownernamebox'))$('ownernamebox').classList.toggle('hide',s.role!=='owner');if(s.role==='owner'&&$('ownername'))$('ownername').value=s.owner_name||'KP';$('kokp').innerHTML=isKP?'<h3>玩家管理</h3>'+s.players.map(p=>'<div class="row"><span>'+esc(p.name)+(p.co_kp?'（共同KP）':'')+(p.char_name?' · '+esc(p.char_name):'')+'</span>'+(s.role==='owner'?'<button class="alt" onclick="setCoKp(\''+p.id+'\','+(!p.co_kp)+')">'+(p.co_kp?'取消共同KP':'設為共同KP')+'</button>':'')+(p.char_name?'<button class="bad" onclick="deleteChar(\''+p.id+'\',\''+esc(p.char_name).replace(/&#39;/g,"\\'")+'\')">刪除角色卡</button>':'')+((s.role==='owner'||!p.co_kp)?'<button class="bad" onclick="kickPlayer(\''+p.id+'\',\''+esc(p.name).replace(/&#39;/g,"\\'")+'\')">踢出</button>':'')+'</div>').join(''):''}
+function charCard(p,role,aid,ended){if(p.char_hidden)return '<div class="card"><b>'+esc(p.name)+'</b><p>🔒 角色卡已設為私密，只有本人與 KP 可查看。</p></div>';let c=p.char||{},can=!ended&&(['owner','kp'].includes(role)||aid===p.id),dis=can?'':'disabled',attrs=c.attrs||{},skills=c.skills||{};let skillText=Object.entries(skills).map(([k,v])=>k+'='+v).join('\n');let inp=(pre,label,val,type='text')=>'<label>'+label+'</label><input id="'+pre+p.id+'" type="'+type+'" value="'+esc(val??'')+'" '+dis+'>';let ta=(pre,label,val)=>'<label>'+label+'</label><textarea id="'+pre+p.id+'" '+dis+'>'+esc(val||'')+'</textarea>';return '<div class="card"><h3>'+esc(p.name)+' 的角色卡</h3>'+inp('dn','房間顯示名稱',p.name)+inp('cn','角色名稱',c.name)+inp('co','職業',c.occupation)+ '<div class="row">'+inp('ca','年齡',c.age)+inp('gender','性別',c.gender)+'</div><details><summary>基本資料／背景</summary>'+inp('position','職位／身分',c.position)+inp('birth','出生地',c.birthplace)+inp('residence','居住地',c.residence)+inp('education','學歷',c.education)+inp('sheetplayer','人物卡上的玩家',c.sheet_player)+ta('traits','特徵',c.traits)+ta('occnotes','職業備忘',c.occupation_notes)+'</details><div class="attrgrid">'+['STR','CON','SIZ','DEX','APP','INT','POW','EDU'].map(k=>'<label>'+k+'<input id="a'+k+p.id+'" type="number" value="'+(attrs[k]||0)+'" '+dis+'></label>').join('')+'</div><div class="row"><label>HP<input id="hp'+p.id+'" type="number" value="'+(c.hp??10)+'" '+dis+'></label><label>MP<input id="mp'+p.id+'" type="number" value="'+(c.mp??10)+'" '+dis+'></label><label>SAN<input id="san'+p.id+'" type="number" value="'+(c.san??50)+'" '+dis+'></label><label>幸運<input id="luck'+p.id+'" type="number" value="'+(c.luck??50)+'" '+dis+'></label></div><details><summary>衍生數值</summary><div class="row">'+inp('mov','MOV',c.mov,'number')+inp('build','體格',c.build)+inp('db','DB',c.db)+'</div><div class="row">'+inp('insp','靈感',c.inspiration,'number')+inp('know','知識',c.knowledge,'number')+'</div></details><label>技能（每行 技能=數值）</label><textarea id="sk'+p.id+'" '+dis+'>'+esc(skillText)+'</textarea><details><summary>資產／金錢</summary>'+inp('currency','貨幣',c.currency)+inp('living','生活水平',c.living_standard)+inp('cash','現金',c.cash)+inp('spending','消費水平',c.spending_level)+inp('assets','資產',c.assets)+ta('assetdetails','資產內容',c.asset_details)+'</details><details><summary>調查員背景故事</summary>'+ta('appearance','形象描述',c.appearance_desc)+ta('personality','性格特徵',c.personality)+ta('ideology','思想／信念',c.ideology)+ta('scars','傷勢及傷痕',c.scars)+ta('significant','重要之人及理由',c.significant_person)+ta('phobias','恐懼症及狂躁症',c.phobias)+ta('place','意義非凡之地',c.meaningful_place)+ta('treasure','寶貴之物',c.treasured_item)+ta('anchor','心靈支柱',c.anchor)+ta('exp','經驗包',c.experience_pack)+ta('backstory','生平故事',c.backstory)+'</details>'+ta('inv','隨身物品',c.inventory)+'<details><summary>武器／冒險／關係／咒文／神話接觸</summary>'+ta('weapons','武器',c.weapons)+ta('adventures','劇本遭遇／改變',c.adventures)+ta('contacts','同伴及關係人',c.contacts)+ta('spells','咒文',c.spells)+ta('supernatural','第三類接觸／神話知識',c.supernatural)+'</details>'+ta('pn','公開備註',c.public_notes)+ta('pr','私人備註（僅本人＋KP）',c.private_notes)+'<label>角色卡可見範圍</label><select id="vis'+p.id+'" '+dis+'><option value="kp_only" '+(c.visibility!=='public'?'selected':'')+'>僅本人＋KP</option><option value="public" '+(c.visibility==='public'?'selected':'')+'>全房間公開</option></select>'+(can?'<button onclick="saveChar(\''+p.id+'\')">儲存角色卡</button> '+(['owner','kp'].includes(role)&&c.name?'<button class="bad" onclick="deleteChar(\''+p.id+'\',\''+esc(c.name).replace(/&#39;/g,"\\'")+'\')">刪除角色卡</button>':'')+'<details><summary>匯入 CoC7 Google 試算表</summary><div class="small">支援 CoC7版自動計算人物卡V3；會讀取基本資料、屬性、技能、資產、背景、物品、武器、咒文等。</div><input id="url'+p.id+'" placeholder="Google 試算表連結"><button class="alt" onclick="importSheet(\''+p.id+'\',\'url\')">讀取連結</button><textarea id="paste'+p.id+'" placeholder="或貼上試算表 A1:Z150 資料"></textarea><button class="alt" onclick="importSheet(\''+p.id+'\',\'text\')">讀取貼上資料</button></details>':'')+'</div>'}
+function parseSkills(t){let o={};t.split(/\n+/).forEach(l=>{let m=l.match(/^(.+?)[=:：]\s*(\d{1,3})\s*$/);if(m)o[m[1].trim()]=Math.max(0,Math.min(100,+m[2]))});return o}async function saveChar(id){try{let attrs={};['STR','CON','SIZ','DEX','APP','INT','POW','EDU'].forEach(k=>attrs[k]=+$('a'+k+id).value);let g=pre=>$(pre+id)?$(pre+id).value:'';let ch={name:g('cn'),occupation:g('co'),age:g('ca'),gender:g('gender'),position:g('position'),birthplace:g('birth'),residence:g('residence'),education:g('education'),sheet_player:g('sheetplayer'),traits:g('traits'),occupation_notes:g('occnotes'),attrs,hp:+g('hp'),mp:+g('mp'),san:+g('san'),luck:+g('luck'),mov:+g('mov'),build:g('build'),db:g('db'),inspiration:+g('insp'),knowledge:+g('know'),skills:parseSkills(g('sk')),currency:g('currency'),living_standard:g('living'),cash:g('cash'),spending_level:g('spending'),assets:g('assets'),asset_details:g('assetdetails'),appearance_desc:g('appearance'),personality:g('personality'),ideology:g('ideology'),scars:g('scars'),significant_person:g('significant'),phobias:g('phobias'),meaningful_place:g('place'),treasured_item:g('treasure'),anchor:g('anchor'),experience_pack:g('exp'),backstory:g('backstory'),inventory:g('inv'),weapons:g('weapons'),adventures:g('adventures'),contacts:g('contacts'),spells:g('spells'),supernatural:g('supernatural'),public_notes:g('pn'),private_notes:g('pr'),visibility:g('vis'),source:'manual'};await api('/api/room/'+S.code+'/rename',{method:'POST',body:JSON.stringify({token:S.token,pid:id,name:g('dn')||'未命名'})});await api('/api/room/'+S.code+'/char',{method:'POST',body:JSON.stringify({token:S.token,pid:id,char:ch})});if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();lastPlayersKey='';await refresh();notify('✓ 角色卡已儲存')}catch(e){notify(e.message,true)}}async function deleteChar(id,name){if(!confirm('確定刪除「'+name+'」的角色卡？角色資料會清空且無法復原。'))return;try{await api('/api/room/'+S.code+'/delete-char',{method:'POST',body:JSON.stringify({token:S.token,pid:id})});lastPlayersKey='';notify('✓ 角色卡已刪除');await refresh()}catch(e){notify(e.message,true)}}async function importSheet(id,kind){try{let body={token:S.token,pid:id};if(kind==='url')body.url=$('url'+id).value;else body.text=$('paste'+id).value;let d=await api('/api/room/'+S.code+'/import-sheet',{method:'POST',body:JSON.stringify(body)});applyPreview(id,d.preview);let n=Object.keys(d.preview.skills||{}).length;notify('✓ 已讀取人物卡：'+(d.preview.name||'未命名')+'，'+n+' 項技能與其他資料')}catch(e){notify(e.message,true)}}function applyPreview(id,c){let set=(pre,v)=>{let e=$(pre+id);if(e)e.value=v??''};set('cn',c.name);set('co',c.occupation);set('ca',c.age);set('gender',c.gender);set('position',c.position);set('birth',c.birthplace);set('residence',c.residence);set('education',c.education);set('sheetplayer',c.sheet_player);set('traits',c.traits);set('occnotes',c.occupation_notes);Object.entries(c.attrs||{}).forEach(([k,v])=>set('a'+k,v));set('hp',c.hp);set('mp',c.mp);set('san',c.san);set('luck',c.luck);set('mov',c.mov);set('build',c.build);set('db',c.db);set('insp',c.inspiration);set('know',c.knowledge);set('sk',Object.entries(c.skills||{}).map(([k,v])=>k+'='+v).join('\n'));set('currency',c.currency);set('living',c.living_standard);set('cash',c.cash);set('spending',c.spending_level);set('assets',c.assets);set('assetdetails',c.asset_details);set('appearance',c.appearance_desc);set('personality',c.personality);set('ideology',c.ideology);set('scars',c.scars);set('significant',c.significant_person);set('phobias',c.phobias);set('place',c.meaningful_place);set('treasure',c.treasured_item);set('anchor',c.anchor);set('exp',c.experience_pack);set('backstory',c.backstory);set('inv',c.inventory);set('weapons',c.weapons);set('adventures',c.adventures);set('contacts',c.contacts);set('spells',c.spells);set('supernatural',c.supernatural)}
 async function send(){let t=$('ci').value.trim();if(!t)return;try{await api('/api/room/'+S.code+'/chat',{method:'POST',body:JSON.stringify({token:S.token,text:t})});$('ci').value='';forceChatBottom=true;refresh()}catch(e){notify(e.message,true)}}async function sendDiceCmd(){let t=$('dicecmd').value.trim();if(!t)return;try{await api('/api/room/'+S.code+'/chat',{method:'POST',body:JSON.stringify({token:S.token,text:t})});$('dicecmd').value='';await refresh();tab('story')}catch(e){notify(e.message,true)}}async function renameOwner(){try{let d=await api('/api/room/'+S.code+'/rename',{method:'POST',body:JSON.stringify({token:S.token,name:$('ownername').value||'KP'})});notify('✓ KP 名稱已改為 '+d.name);refresh()}catch(e){notify(e.message,true)}}async function setLimit(){try{await api('/api/room/'+S.code+'/limit',{method:'POST',body:JSON.stringify({token:S.token,limit:+$('nl').value})});refresh()}catch(e){notify(e.message,true)}}async function setScene(){try{await api('/api/room/'+S.code+'/scene',{method:'POST',body:JSON.stringify({token:S.token,scene:$('ss').value})});refresh()}catch(e){notify(e.message,true)}}async function addClue(visibility){let text=$('cl').value.trim();if(!text)return notify('請輸入線索內容',true);let target=visibility==='player'?($('ct').value||null):null;if(visibility==='player'&&!target)return notify('請先選擇指定調查員',true);try{await api('/api/room/'+S.code+'/clue',{method:'POST',body:JSON.stringify({token:S.token,text:text,visibility:visibility,target:target})});$('cl').value='';notify(visibility==='public'?'✓ 線索已公開給全員':visibility==='player'?'✓ 線索已交給指定玩家':'✓ 線索已保存為 KP 私藏');await refresh()}catch(e){notify(e.message,true)}}function queueNoteSave(){noteDirty=true;let st=$('notestatus');if(st)st.textContent='儲存中…';clearTimeout(noteSaveTimer);noteSaveTimer=setTimeout(saveNoteAuto,500)}async function saveNoteAuto(){if(!S.code||!$('nt'))return;let text=$('nt').value;try{await api('/api/room/'+S.code+'/note',{method:'POST',body:JSON.stringify({token:S.token,text:text})});noteDirty=false;let st=$('notestatus');if(st){st.textContent='✓ 已自動儲存';clearTimeout(window.__noteStatusTimer);window.__noteStatusTimer=setTimeout(()=>{if(st)st.textContent='自動儲存'},1300)}}catch(e){let st=$('notestatus');if(st)st.textContent='⚠ 儲存失敗';notify(e.message,true)}}async function setCoKp(id,en){try{await api('/api/room/'+S.code+'/co-kp',{method:'POST',body:JSON.stringify({token:S.token,pid:id,enabled:en})});refresh()}catch(e){notify(e.message,true)}}async function kickPlayer(id,name){try{await api('/api/room/'+S.code+'/kick',{method:'POST',body:JSON.stringify({token:S.token,pid:id})});notify('✓ 已將 '+name+' 移出房間');refresh()}catch(e){notify(e.message,true)}}async function leaveRoom(){try{await api('/api/room/'+S.code+'/leave',{method:'POST',body:JSON.stringify({token:S.token})});resetHome();notify('✓ 你已離開房間')}catch(e){notify(e.message,true)}}async function disbandRoom(){if(!confirm('確定要解散房間？所有玩家都會立即離開。'))return;try{await api('/api/room/'+S.code+'/disband',{method:'POST',body:JSON.stringify({token:S.token})});resetHome('房間已解散。')}catch(e){notify(e.message,true)}}async function endRoom(){if(confirm('結束遊戲後將停止聊天、擲骰與角色修改。確定結束？')){try{await api('/api/room/'+S.code+'/end',{method:'POST',body:JSON.stringify({token:S.token})});notify('✓ 遊戲已結束');refresh()}catch(e){notify(e.message,true)}}}function tab(id){document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$(id).classList.add('on');scrollTo(0,0)}async function clip(t){let ok=false;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(t);ok=true}else{let x=document.createElement('textarea');x.value=t;x.setAttribute('readonly','');x.style.position='fixed';x.style.opacity='0';document.body.appendChild(x);x.select();ok=document.execCommand('copy');x.remove()}}catch(e){ok=false}notify(ok?'✓ 已複製':'複製失敗，請長按文字複製',!ok);return ok}function copyCode(){clip(S.code)}function copyInvite(){clip(location.origin+'/?room='+S.code)}function copyKpInvite(){if(!S.st||!S.st.kp_invite)return notify('共同 KP 邀請尚未載入',true);clip(location.origin+'/?room='+S.code+'&kp='+encodeURIComponent(S.st.kp_invite))}let qp=new URLSearchParams(location.search);if(qp.get('room')){$('rc').value=qp.get('room').toUpperCase();$('gkc').value=qp.get('room').toUpperCase();if(qp.get('kp')){$('gki').value=qp.get('kp');$('gkn').focus()}else{$('gn').focus()}}try{let d=JSON.parse(localStorage.getItem('coc-v8')||'null');if(d&&d.code&&d.token)enter(d)}catch(e){}
 </script></body></html>'''
