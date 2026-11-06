@@ -154,6 +154,98 @@ def roll_dice_expr(expr: str):
     return total, ' '.join(detail)
 
 
+
+
+def format_basic_roll(expr: str):
+    """Roll a simple + / - dice expression and format each die term like 3[3]+18[18]+1 = 22."""
+    expr0 = expr.strip()
+    compact = expr0.lower().replace(' ', '')
+    if not compact or len(compact) > 80 or not re.fullmatch(r'[0-9d+\-]+', compact):
+        raise ValueError('骰式格式錯誤，例如：1D3+1、1d6+1d20')
+    tokens = re.findall(r'[+\-]?[^+\-]+', compact)
+    if len(tokens) > 12:
+        raise ValueError('骰式過長')
+    total = 0
+    parts = []
+    for idx, tok in enumerate(tokens):
+        sign = -1 if tok.startswith('-') else 1
+        core = tok.lstrip('+-')
+        prefix = '-' if sign < 0 else ('+' if idx > 0 else '')
+        if 'd' in core:
+            a,b = core.split('d',1)
+            n = int(a or '1'); sides = int(b)
+            if not 1 <= n <= 30 or not 2 <= sides <= 1000:
+                raise ValueError('骰子數量或面數超出範圍')
+            rs = [random.randint(1,sides) for _ in range(n)]
+            subtotal = sum(rs)
+            total += sign * subtotal
+            shown = '+'.join(str(x) for x in rs)
+            parts.append(f"{prefix}{subtotal}[{shown}]")
+        else:
+            v = int(core)
+            total += sign * v
+            parts.append(f"{prefix}{v}")
+    return total, ''.join(parts)
+
+
+def basic_roll_command(raw: str):
+    """Support `1D3+1` and repeated form `3 1d6+1d20`."""
+    m = re.fullmatch(r'\s*(\d+)\s+([0-9dD+\-]+)\s*', raw)
+    if m:
+        count = int(m.group(1)); expr = m.group(2)
+        if not 1 <= count <= 30:
+            raise ValueError('重複擲骰次數需為 1～30')
+        lines = ['基本骰組：（複數擲骰）']
+        for i in range(1, count+1):
+            total, detail = format_basic_roll(expr)
+            lines.append(f'第{i}次擲骰：{detail} = {total}')
+        return '\n'.join(lines)
+    if re.fullmatch(r'\s*[0-9dD+\-]+\s*', raw) and re.search(r'[dD]', raw):
+        total, detail = format_basic_roll(raw)
+        return f'基本骰組：{detail} = {total}'
+    return None
+
+
+def ccyc_command():
+    lines = ['COC7 創角骰組（Ccyc）', '', '七次(3d6)*5，自選其中五個結果任意分配於 STR、CON、DEX、APP、POW。']
+    for i in range(1,8):
+        rs=[random.randint(1,6) for _ in range(3)]; val=sum(rs)*5
+        lines.append(f'第{i}次投骰 → [{",".join(map(str,rs))}]*5 →{val}')
+    lines += ['', '四次(2d6+6)*5，自選其中三個結果任意分配於 SIZ、INT、EDU。']
+    for i in range(1,5):
+        rs=[random.randint(1,6) for _ in range(2)]; val=(sum(rs)+6)*5
+        lines.append(f'第{i}次投骰 → ([{",".join(map(str,rs))}]+6)*5 →{val}')
+    lines += ['', '兩次(3d6)*5，自選其一填入 LUK。']
+    for i in range(1,3):
+        rs=[random.randint(1,6) for _ in range(3)]; val=sum(rs)*5
+        lines.append(f'第{i}次投骰 → [{",".join(map(str,rs))}]*5 →{val}')
+    return '\n'.join(lines)
+
+
+def cc_compare_command(raw: str):
+    m = re.fullmatch(r'(?i)cc\s*(>=|<=|==|=|>|<)\s*(\d{1,3})\s*', raw)
+    if not m:
+        return None
+    op = m.group(1); target = int(m.group(2))
+    if not 0 <= target <= 100:
+        raise ValueError('Cc 比較值需為 0～100')
+    roll = random.randint(1,100)
+    ok = {'>':roll>target,'<':roll<target,'>=':roll>=target,'<=':roll<=target,'=':roll==target,'==':roll==target}[op]
+    verdict = '成功' if ok else '失敗'
+    growth = '該技能可成長。' if ok else '該技能無成長。'
+    return f'(1D100{op}{target}) → {roll} → {verdict}\n{growth}'
+
+
+def looks_like_dice_command(text: str):
+    t=text.strip()
+    if not t: return False
+    if t.startswith(('.', '/')): return True
+    if re.fullmatch(r'(?i)ccyc', t): return True
+    if re.fullmatch(r'(?i)cc\s*(>=|<=|==|=|>|<)\s*\d{1,3}', t): return True
+    if re.fullmatch(r'\d+\s+[0-9dD+\-]+', t): return True
+    if re.fullmatch(r'[0-9dD+\-]+', t) and re.search(r'[dD]', t): return True
+    return False
+
 def own_player(r, aid):
     return next((p for p in r['ps'] if p['id'] == aid), None)
 
@@ -246,8 +338,16 @@ def bot_command(r, role, aid, text):
     if raw.startswith('/'):
         raw = '.' + raw[1:]
     lower = raw.lower()
+    if lower == 'ccyc':
+        return ccyc_command(), hidden
+    cmp_msg = cc_compare_command(raw)
+    if cmp_msg is not None:
+        return cmp_msg, hidden
+    basic_msg = basic_roll_command(raw)
+    if basic_msg is not None:
+        return basic_msg, hidden
     if lower in ('.help', '.?', '.rules'):
-        return ('骰娘 v5｜.r 2d6+1｜.ra 偵查 [60] [n/h/e]｜.rb/.rbb 獎勵骰｜.rp/.rpp 懲罰骰｜'
+        return ('骰娘 v6｜Ccyc 創角｜Cc>70 成長比較｜1D3+1 基本骰｜3 1d6+1d20 複數骰｜.ra 偵查 [60] [n/h/e]｜.rb/.rbb 獎勵骰｜.rp/.rpp 懲罰骰｜'
                 '.push 推骰上一個失敗檢定｜.op 偵查 60 | 潛行 50｜.sc 0/1d6 [SAN]｜.luck [數值]｜KP 暗骰：.h .ra 偵查 60'), hidden
     if lower.startswith('.r ') and not lower.startswith(('.ra ', '.rb ', '.rp ', '.rbb ', '.rpp ')):
         expr = raw[3:].strip(); total, detail = roll_dice_expr(expr)
@@ -406,7 +506,7 @@ def home():
 def home_head():
     return HTMLResponse('', headers={'Cache-Control':'no-store, max-age=0'})
 @app.get('/health')
-def health(): return {'ok':1,'rooms':len(rooms),'version':'v5'}
+def health(): return {'ok':1,'rooms':len(rooms),'version':'v6'}
 
 @app.post('/api/create')
 def create(x: Create):
@@ -442,7 +542,7 @@ def chat(c:str,x:ChatIn):
     who='KP' if is_kp(role) else own_player(r,aid)['name']
     text=x.text.strip()
     if not text: return {'ok':1}
-    if text.startswith(('.', '/')):
+    if looks_like_dice_command(text):
         try:
             result,hidden=bot_command(r,role,aid,text)
             msg={'who':'骰娘','text':result,'kind':'dice','by':who}
@@ -589,6 +689,11 @@ def selftest():
         chat(c,ChatIn(token=g['token'],text='.sc 0/1d6 55')); assert 'SAN 損失' in rooms[c]['chat'][-1]['text']; checks.append('san')
         chat(c,ChatIn(token=a['token'],text='.h .ra 偵查 60')); assert rooms[c]['hidden']; checks.append('hidden_roll')
         qr=roll(c,RollIn(token=g['token'],label='偵查',target=60,mode='normal',difficulty='hard')); assert 'meets' in qr and qr['result'] in LEVEL_RANK; checks.append('quick_roll')
+        # user-defined raw dice / character generation / comparator commands
+        chat(c,ChatIn(token=g['token'],text='Ccyc')); assert '七次(3d6)*5' in rooms[c]['chat'][-1]['text'] and '兩次(3d6)*5' in rooms[c]['chat'][-1]['text']; checks.append('ccyc')
+        chat(c,ChatIn(token=g['token'],text='Cc>70')); assert '(1D100>70)' in rooms[c]['chat'][-1]['text'] and ('該技能可成長。' in rooms[c]['chat'][-1]['text'] or '該技能無成長。' in rooms[c]['chat'][-1]['text']); checks.append('cc_compare')
+        chat(c,ChatIn(token=g['token'],text='3 1d6+1d20')); assert '基本骰組：（複數擲骰）' in rooms[c]['chat'][-1]['text'] and '第3次擲骰' in rooms[c]['chat'][-1]['text']; checks.append('multi_basic')
+        chat(c,ChatIn(token=g['token'],text='1D3+1')); assert rooms[c]['chat'][-1]['text'].startswith('基本骰組：') and ' = ' in rooms[c]['chat'][-1]['text']; checks.append('single_basic')
         # clues
         add_clue(c,ClueIn(token=a['token'],text='KP秘密',visibility='kp')); add_clue(c,ClueIn(token=a['token'],text='公開線索',visibility='public')); checks.append('clues')
         assert len(state(c,g['token'])['clues'])==1 and len(state(c,a['token'])['clues'])==2; checks.append('clue_privacy')
@@ -605,7 +710,7 @@ def selftest():
             chat(c,ChatIn(token=g['token'],text='x')); raise AssertionError('end lock failed')
         except HTTPException as e:
             assert e.status_code==409; checks.append('end_lock')
-        return {'ok':True,'checks':checks,'count':len(checks),'version':'v5'}
+        return {'ok':True,'checks':checks,'count':len(checks),'version':'v6'}
     except Exception as e:
         return JSONResponse({'ok':False,'checks':checks,'error':repr(e)},status_code=500)
     finally:
@@ -623,14 +728,14 @@ HTML = r'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta
 :root{--bg:#07110d;--card:#0e1d16;--line:#294b3a;--green:#7dd3a7;--muted:#9db1a5;--red:#8a3030;--gold:#d6bc7a}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#eef7f0;font-family:system-ui,-apple-system,sans-serif}.w{max-width:1100px;margin:auto;padding:18px 14px 90px}.hero{text-align:center;padding:22px 0}.grid,.room{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:14px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;margin:4px 0 9px;padding:10px;border-radius:10px;border:1px solid #315642;background:#09140f;color:#fff}textarea{min-height:90px}button{padding:10px 13px;border:0;border-radius:10px;background:var(--green);color:#062015;font-weight:800;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}.alt{background:#173629;color:#fff}.bad{background:var(--red);color:#fff}.gold{background:var(--gold);color:#211907}.hide{display:none!important}.chat{height:48vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px}.m{margin:0 0 9px;white-space:pre-wrap}.who{color:var(--green);font-weight:800}.row{display:flex;gap:8px}.row>*{flex:1}.small{color:var(--muted);font-size:13px}.pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:5px 9px;margin:3px}.tabs{display:flex;gap:7px;margin:10px 0;flex-wrap:wrap}.tabs button{background:#173629;color:#fff}.sec{display:none}.sec.on{display:block}.bottom{display:none;position:fixed;bottom:0;left:0;right:0;background:#0b1812;padding:8px;grid-template-columns:repeat(3,1fr);gap:8px;z-index:5}.attrgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.skillgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}.clue{padding:9px;border-left:3px solid var(--green);background:#0a1711;margin:7px 0}.modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;padding:15px;z-index:20}.modalbox{max-width:760px;max-height:85vh;overflow:auto;background:#102219;border:1px solid var(--line);border-radius:18px;padding:18px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.code{font-family:ui-monospace,monospace;font-size:18px;color:var(--gold)}details{border:1px solid var(--line);border-radius:10px;padding:9px;margin:8px 0}a{color:var(--green)}
 @media(max-width:720px){.grid,.room{grid-template-columns:1fr}.bottom{display:grid}.desktop{display:none}.attrgrid{grid-template-columns:repeat(2,1fr)}.skillgrid{grid-template-columns:1fr}.chat{height:45vh}}
 </style></head><body><div class="w">
-<section id="home"><div class="hero"><h1>克蘇魯調查局</h1><div class="small">CoC 7 文字跑團｜訪客免帳號 · v5</div><button class="alt" onclick="rules()">規則／骰娘指令</button></div><div class="grid"><div class="card"><h2>KP 開房</h2><label>房間名稱</label><input id="rn" placeholder="例如：週五克蘇魯團"><label>劇本</label><select id="sc"><option>自由跑團</option><option>營火</option></select><label>調查員人數上限</label><input id="lim" type="number" min="1" max="50" value="4"><button onclick="createRoom()">建立房間</button></div><div class="card"><h2>訪客加入</h2><label>暱稱</label><input id="gn" placeholder="你的暱稱"><label>房號</label><input id="rc" maxlength="6"><button onclick="joinRoom()">加入房間</button></div></div><div id="err"></div></section>
+<section id="home"><div class="hero"><h1>克蘇魯調查局</h1><div class="small">CoC 7 文字跑團｜訪客免帳號 · v6</div><button class="alt" onclick="rules()">規則／骰娘指令</button></div><div class="grid"><div class="card"><h2>KP 開房</h2><label>房間名稱</label><input id="rn" placeholder="例如：週五克蘇魯團"><label>劇本</label><select id="sc"><option>自由跑團</option><option>營火</option></select><label>調查員人數上限</label><input id="lim" type="number" min="1" max="50" value="4"><button onclick="createRoom()">建立房間</button></div><div class="card"><h2>訪客加入</h2><label>暱稱</label><input id="gn" placeholder="你的暱稱"><label>房號</label><input id="rc" maxlength="6"><button onclick="joinRoom()">加入房間</button></div></div><div id="err"></div></section>
 <section id="game" class="hide"><div class="topbar"><div><h2 id="title"></h2><span class="pill" id="scene"></span><span class="pill" id="count"></span><span class="pill" id="role"></span></div><div><div class="code" id="roomcode"></div><button class="alt" onclick="copyCode()">複製房號</button> <button class="alt" onclick="copyInvite()">複製邀請連結</button> <button class="gold" onclick="rules()">規則</button></div></div><div id="ended" class="card hide">房間已結束，聊天、擲骰與角色修改已停用。</div><div class="tabs desktop"><button onclick="tab('story')">故事</button><button onclick="tab('chars')">角色</button><button onclick="tab('dice')">擲骰</button><button class="kp" onclick="tab('kp')">KP 主持台</button></div><div class="room"><main>
 <div id="story" class="sec on"><div id="chat" class="chat"></div><div class="row"><input id="ci" placeholder="留言或輸入 .help 查看骰娘指令" onkeydown="if(event.key==='Enter')send()"><button id="sendbtn" onclick="send()">送出</button></div></div>
 <div id="chars" class="sec"><div class="card"><h2>角色卡</h2><div class="small">角色卡預設「僅本人＋KP」。本人可改成全房公開；私人筆記永遠只有本人與 KP 看得到。</div><div id="players"></div></div></div>
 <div id="dice" class="sec"><div class="card"><h2>快速擲骰 v5</h2><label>檢定名稱</label><input id="lab" value="偵查"><label>目標值</label><input id="tar" type="number" placeholder="例如 60"><label>需求難度</label><select id="diff"><option value="normal">一般成功以上</option><option value="hard">困難成功以上</option><option value="extreme">極限成功以上</option></select><label>獎勵／懲罰</label><select id="mode"><option value="normal">無</option><option value="b">1 顆獎勵骰</option><option value="bb">2 顆獎勵骰</option><option value="p">1 顆懲罰骰</option><option value="pp">2 顆懲罰骰</option></select><label class="kp"><input id="hid" type="checkbox" style="width:auto"> KP 暗骰</label><br><div class="row"><button id="rollbtn" onclick="roll()">擲 d100</button><button class="alt" onclick="pushLast()">推骰上一個失敗檢定</button></div><div id="rr"></div><hr><div class="small">聊天骰娘可輸入：<b>.ra 偵查</b>、<b>.ra 偵查 60 h</b>、<b>.rb 偵查 60</b>、<b>.push</b>、<b>.op 偵查 60 | 潛行 50</b>、<b>.sc 0/1d6 55</b>。輸入 <b>.help</b> 查看全部。</div></div></div>
 <div id="kp" class="sec kp"><div class="card"><h2>KP 主持台</h2><label>調查員人數上限</label><div class="row"><input id="nl" type="number" min="1" max="50"><button onclick="setLimit()">修改</button></div><label>場景</label><select id="ss"></select><button onclick="setScene()">切換場景</button><hr><h3>線索</h3><div class="small">公開＝全房看見；僅KP＝所有KP可見；指定玩家＝只有KP與該玩家可見。</div><input id="cl" placeholder="輸入線索內容"><select id="cv"><option value="public">公開</option><option value="kp">僅KP</option><option value="player">指定玩家</option></select><select id="ct"></select><button onclick="addClue()">新增線索</button><hr><label>KP 私人筆記</label><textarea id="nt"></textarea><button class="alt" onclick="saveNote()">儲存筆記</button><hr><div id="kokp"></div><hr><button class="bad" onclick="endRoom()">結束房間</button></div></div>
 </main><aside><div class="card"><h3>線索</h3><div id="clues"></div></div><div class="card"><h3>玩家／KP</h3><div id="side"></div></div></aside></div></section></div>
-<div id="bottom" class="bottom hide"><button onclick="tab('story')">故事</button><button onclick="tab('chars')">角色</button><button onclick="tab('dice')">擲骰</button></div><div id="modal" class="modal hide" onclick="if(event.target.id==='modal')closeRules()"><div class="modalbox"><button style="float:right" onclick="closeRules()">關閉</button><h2>CoC 7 骰子規則 v5</h2><p><b>核心：</b>只有結果不確定且有戲劇性時才擲骰。D100 採低骰制；骰值越低越好。</p><p><b>結果等級：</b>01＝大成功；≤技能 1/5＝極限成功；≤技能 1/2＝困難成功；≤技能＝一般成功；超過技能＝失敗。大失敗：技能值未滿 50 時為 96–100；技能值 50 以上時只有 100。</p><p><b>難度：</b>KP 可要求一般／困難／極限。骰娘會同時顯示「擲出的成功等級」與「是否達到需求」。</p><p><b>獎勵／懲罰骰：</b>保留同一顆個位骰，多擲 1 或 2 顆十位骰；獎勵取較低結果，懲罰取較高結果。</p><p><b>推骰：</b>僅能對上一個未達成需求的技能／屬性檢定推骰一次；需由 KP 允許並先說明失敗代價。推骰再次失敗時，由 KP 套用更嚴重後果。SAN、Luck、戰鬥檢定不應以一般推骰處理。</p><p><b>對抗：</b>雙方比較成功等級；等級相同時技能值較高者勝；技能值也相同時骰值較低者勝。</p><p><b>SAN：</b>骰娘只計算檢定與損失值，不會自動修改角色 SAN，由 KP／玩家確認後再改角色卡。</p><h3>聊天骰娘指令</h3><ul><li><b>.r 2d6+1</b>：一般骰式</li><li><b>.ra 偵查</b>：讀角色卡技能值，做一般需求檢定</li><li><b>.ra 偵查 60 h</b>：指定 60%，需求困難成功；<b>e</b> 代表極限</li><li><b>.rb / .rbb</b>：1／2 顆獎勵骰</li><li><b>.rp / .rpp</b>：1／2 顆懲罰骰</li><li><b>.push</b>：推骰上一個失敗檢定</li><li><b>.op 偵查 60 | 潛行 50</b>：對抗檢定</li><li><b>.sc 0/1d6 55</b>：SAN 檢定與損失</li><li><b>.luck 60</b>：幸運檢定</li><li><b>.h .ra 偵查 60</b>：KP 暗骰</li><li><b>.help</b>：聊天室顯示指令摘要</li></ul><p class="small">依 Call of Cthulhu 7th Edition Quick-Start 的技能、難度、推骰、對抗與獎勵／懲罰骰邏輯整理；實際裁定仍以 KP 為準。</p></div></div>
+<div id="bottom" class="bottom hide"><button onclick="tab('story')">故事</button><button onclick="tab('chars')">角色</button><button onclick="tab('dice')">擲骰</button></div><div id="modal" class="modal hide" onclick="if(event.target.id==='modal')closeRules()"><div class="modalbox"><button style="float:right" onclick="closeRules()">關閉</button><h2>CoC 7 骰子規則 v5</h2><p><b>核心：</b>只有結果不確定且有戲劇性時才擲骰。D100 採低骰制；骰值越低越好。</p><p><b>結果等級：</b>01＝大成功；≤技能 1/5＝極限成功；≤技能 1/2＝困難成功；≤技能＝一般成功；超過技能＝失敗。大失敗：技能值未滿 50 時為 96–100；技能值 50 以上時只有 100。</p><p><b>難度：</b>KP 可要求一般／困難／極限。骰娘會同時顯示「擲出的成功等級」與「是否達到需求」。</p><p><b>獎勵／懲罰骰：</b>保留同一顆個位骰，多擲 1 或 2 顆十位骰；獎勵取較低結果，懲罰取較高結果。</p><p><b>推骰：</b>僅能對上一個未達成需求的技能／屬性檢定推骰一次；需由 KP 允許並先說明失敗代價。推骰再次失敗時，由 KP 套用更嚴重後果。SAN、Luck、戰鬥檢定不應以一般推骰處理。</p><p><b>對抗：</b>雙方比較成功等級；等級相同時技能值較高者勝；技能值也相同時骰值較低者勝。</p><p><b>SAN：</b>骰娘只計算檢定與損失值，不會自動修改角色 SAN，由 KP／玩家確認後再改角色卡。</p><h3>聊天骰娘指令</h3><ul><li><b>Ccyc</b>：依你指定的 CoC7 創角骰組，產生 7 組 STR/CON/DEX/APP/POW 候選、4 組 SIZ/INT/EDU 候選、2 組 LUK 候選</li><li><b>Cc&gt;70</b>：1D100 與指定比較式判定；支援 &gt;、&lt;、&gt;=、&lt;=、=。只顯示是否可成長，不會自動改角色技能值</li><li><b>1D3+1</b>：直接輸入基本骰式</li><li><b>3 1d6+1d20</b>：重複 3 次擲骰並逐次列出結果</li><li><b>.r 2d6+1</b>：一般骰式</li><li><b>.ra 偵查</b>：讀角色卡技能值，做一般需求檢定</li><li><b>.ra 偵查 60 h</b>：指定 60%，需求困難成功；<b>e</b> 代表極限</li><li><b>.rb / .rbb</b>：1／2 顆獎勵骰</li><li><b>.rp / .rpp</b>：1／2 顆懲罰骰</li><li><b>.push</b>：推骰上一個失敗檢定</li><li><b>.op 偵查 60 | 潛行 50</b>：對抗檢定</li><li><b>.sc 0/1d6 55</b>：SAN 檢定與損失</li><li><b>.luck 60</b>：幸運檢定</li><li><b>.h .ra 偵查 60</b>：KP 暗骰</li><li><b>.help</b>：聊天室顯示指令摘要</li></ul><p class="small">依 Call of Cthulhu 7th Edition Quick-Start 的技能、難度、推骰、對抗與獎勵／懲罰骰邏輯整理；實際裁定仍以 KP 為準。</p></div></div>
 <script>
 let S={code:'',token:'',st:null,timer:null};const $=x=>document.getElementById(x);const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));async function api(u,o={}){let r=await fetch(u,{headers:{'Content-Type':'application/json'},...o}),d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail||'操作失敗');return d}function showErr(e){$('err').innerHTML='<div class="card">⚠️ '+esc(e)+'</div>'}function rules(){$('modal').classList.remove('hide')}function closeRules(){$('modal').classList.add('hide')}
 async function createRoom(){try{let d=await api('/api/create',{method:'POST',body:JSON.stringify({name:$('rn').value||'未命名房間',scenario:$('sc').value,limit:+$('lim').value})});enter(d)}catch(e){showErr(e.message)}}async function joinRoom(){try{let d=await api('/api/join',{method:'POST',body:JSON.stringify({code:$('rc').value.toUpperCase(),name:$('gn').value||'訪客'})});enter(d)}catch(e){showErr(e.message)}}function enter(d){S.code=d.code;S.token=d.token;localStorage.removeItem('coc-v5');localStorage.setItem('coc-v5',JSON.stringify(d));$('home').classList.add('hide');$('game').classList.remove('hide');$('bottom').classList.remove('hide');if(S.timer)clearInterval(S.timer);refresh();S.timer=setInterval(refresh,1400)}function resetHome(msg=''){localStorage.removeItem('coc-v5');S={code:'',token:'',st:null,timer:null};$('game').classList.add('hide');$('bottom').classList.add('hide');$('home').classList.remove('hide');if(msg)showErr(msg)}async function refresh(){if(!S.code)return;try{S.st=await api('/api/room/'+S.code+'?token='+encodeURIComponent(S.token));render()}catch(e){resetHome('原房間已失效，請重新開房或加入。')}}
