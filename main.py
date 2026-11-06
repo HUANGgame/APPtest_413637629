@@ -596,6 +596,11 @@ def parse_sheet_rows(rows):
 
     # Assets / money.
     def right_value(label, label_col, value_col, start=15, end_row=30):
+        # 同一標籤可能同時出現在區塊標題與實際資料列；取第一個「值欄非空」的匹配。
+        for rr in range(start, min(end_row, len(rows)) + 1):
+            if txt(rr, label_col) == label and txt(rr, value_col):
+                return txt(rr, value_col)
+        # 若真的沒有值，才回傳第一個匹配列的空值。
         rr, _ = find_row(label, cols=(label_col,), start=start, end_row=end_row)
         return txt(rr, value_col) if rr else ''
 
@@ -798,7 +803,7 @@ def home():
 def home_head():
     return HTMLResponse('', headers={'Cache-Control':'no-store, max-age=0'})
 @app.get('/health')
-def health(): return {'ok':1,'rooms':len(rooms),'version':'v8.16'}
+def health(): return {'ok':1,'rooms':len(rooms),'version':'v8.17'}
 
 @app.post('/api/create')
 def create(x: Create):
@@ -1147,11 +1152,12 @@ def selftest():
         rows[26][15]='藝術／手藝：'; rows[26][16]='美術'; rows[26][24]='5'
         rows[27][15]='格鬥'; rows[27][16]='鬥毆'; rows[27][24]='25'
         rows[28][1]='生存:'; rows[28][11]='10'
-        rows[18][14]='貨幣'; rows[18][17]='美國-現代'
-        rows[19][14]='生活水平'; rows[19][17]='小康'; rows[19][20]='現金'; rows[19][21]='5,000美金'
-        rows[20][14]='消費水平'; rows[20][17]='1,000美金'
-        rows[21][14]='資產'; rows[21][17]='500,000美金'
-        rows[22][14]='資產內容'; rows[22][17]='房產與存款'
+        rows[16][14]='資產'  # 區塊標題，值欄空白
+        rows[18][14]='貨幣'; rows[18][18]='美國-現代'
+        rows[19][14]='生活水平'; rows[19][18]='小康'; rows[19][21]='現金'; rows[19][22]='5,000美金'
+        rows[20][14]='消費水平'; rows[20][18]='1,000美金'
+        rows[21][14]='資產'; rows[21][18]='500,000美金'
+        rows[22][14]='資產內容'; rows[22][18]='房產與存款'
         rows[40][0]='武器(詳情)'; rows[41][0]='名稱'; rows[42][0]='空手'; rows[42][6]='格鬥（鬥毆）'; rows[42][10]='25'; rows[42][11]='1d3'
         rows[87][0]='調查員背景故事'
         rows[88][0]='形象描述'; rows[88][2]='像哈利波特'; rows[88][12]='性格特徵'; rows[88][15]='機靈'
@@ -1173,7 +1179,8 @@ def selftest():
         assert parsed['skills']['心理學']==50 and parsed['skills']['藝術／手藝：美術']==5 and parsed['skills']['格鬥：鬥毆']==25
         assert '生存' not in parsed['skills'] and '生存:' not in parsed['skills']
         assert parsed['gender']=='男' and parsed['birthplace']=='海南島' and parsed['residence']=='台北' and parsed['education']=='高中'
-        assert parsed['traits']=='心理測量、其他語言' and parsed['cash']=='5,000美金' and parsed['assets']=='500,000美金'
+        assert parsed['traits']=='心理測量、其他語言' and parsed['currency']=='美國-現代' and parsed['living_standard']=='小康'
+        assert parsed['cash']=='5,000美金' and parsed['spending_level']=='1,000美金' and parsed['assets']=='500,000美金' and parsed['asset_details']=='房產與存款'
         assert '空手' in parsed['weapons'] and '眼鏡' in parsed['inventory'] and parsed['appearance_desc']=='像哈利波特'
         assert parsed['personality']=='機靈' and parsed['ideology']=='人類不可信' and parsed['backstory']=='從小跟動物生活'
         checks.append('sheet_parse_v3_full')
@@ -1197,7 +1204,7 @@ def selftest():
             chat(c,ChatIn(token=g['token'],text='x')); raise AssertionError('end lock failed')
         except HTTPException as e:
             assert e.status_code==409; checks.append('end_lock')
-        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.16'}
+        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.17'}
     except Exception as e:
         return JSONResponse({'ok':False,'checks':checks,'error':repr(e)},status_code=500)
     finally:
@@ -1215,7 +1222,7 @@ HTML = r'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta
 :root{--bg:#07110d;--card:#0e1d16;--line:#294b3a;--green:#7dd3a7;--muted:#9db1a5;--red:#8a3030;--gold:#d6bc7a}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#eef7f0;font-family:system-ui,-apple-system,sans-serif}.w{max-width:1100px;margin:auto;padding:18px 14px 90px}.hero{text-align:center;padding:22px 0}.grid,.room{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:14px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;margin:4px 0 9px;padding:10px;border-radius:10px;border:1px solid #315642;background:#09140f;color:#fff}textarea{min-height:90px}button{padding:10px 13px;border:0;border-radius:10px;background:var(--green);color:#062015;font-weight:800;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}.alt{background:#173629;color:#fff}.bad{background:var(--red);color:#fff}.gold{background:var(--gold);color:#211907}.hide{display:none!important}.chat{height:48vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px}.m{margin:0 0 9px;white-space:pre-wrap}.who{color:var(--green);font-weight:800}.row{display:flex;gap:8px}.row>*{flex:1}.small{color:var(--muted);font-size:13px}.pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:5px 9px;margin:3px}.tabs{display:flex;gap:7px;margin:10px 0;flex-wrap:wrap}.tabs button{background:#173629;color:#fff}.sec{display:none}.sec.on{display:block}.bottom{display:none;position:fixed;bottom:0;left:0;right:0;background:#0b1812;padding:8px;grid-template-columns:repeat(2,1fr);gap:8px;z-index:5}.attrgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.skillgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}.clue{padding:9px;border-left:3px solid var(--green);background:#0a1711;margin:7px 0}.modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;padding:15px;z-index:20}.modalbox{max-width:760px;max-height:85vh;overflow:auto;background:#102219;border:1px solid var(--line);border-radius:18px;padding:18px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.code{font-family:ui-monospace,monospace;font-size:18px;color:var(--gold)}details{border:1px solid var(--line);border-radius:10px;padding:9px;margin:8px 0}.cmdrow{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #1f3a2c;padding:8px 0}.cmdrow code{color:var(--gold);font-weight:800}.quickgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.quickgrid button{background:#173629;color:#fff;text-align:left}a{color:var(--green)}
 @media(max-width:720px){.grid,.room{grid-template-columns:1fr}.bottom{display:grid}.desktop{display:none}.attrgrid{grid-template-columns:repeat(2,1fr)}.skillgrid{grid-template-columns:1fr}.chat{height:45vh}}
 </style></head><body><div class="w">
-<section id="home"><div class="hero"><h1>克蘇魯調查局</h1><div class="small">CoC 7 文字跑團｜訪客免帳號 · v8.16</div><button class="alt" onclick="rules()">規則／骰娘指令</button></div><div class="grid"><div class="card"><h2>KP 開房</h2><label>KP 名稱</label><input id="kpn" placeholder="例如：阿魚"><label>房間名稱</label><input id="rn" placeholder="例如：週五克蘇魯團"><label>劇本</label><select id="sc"><option>自由跑團</option><option>營火</option></select><label>調查員人數上限</label><input id="lim" type="number" min="1" max="50" value="4"><button onclick="createRoom()">建立房間</button></div><div class="card"><h2>訪客加入</h2><label>暱稱</label><input id="gn" placeholder="你的暱稱"><label>房號</label><input id="rc" maxlength="6"><button onclick="joinRoom()">加入房間</button></div><div class="card"><h2>共同 KP 加入</h2><div class="small">通常由房主傳「共同 KP 邀請連結」給你。</div><label>暱稱</label><input id="gkn" placeholder="KP 暱稱"><label>房號</label><input id="gkc" maxlength="6"><label>共同 KP 邀請碼</label><input id="gki" placeholder="邀請連結會自動填入"><button onclick="joinKpRoom()">以共同 KP 加入</button></div></div><div id="err"></div></section>
+<section id="home"><div class="hero"><h1>克蘇魯調查局</h1><div class="small">CoC 7 文字跑團｜訪客免帳號 · v8.17</div><button class="alt" onclick="rules()">規則／骰娘指令</button></div><div class="grid"><div class="card"><h2>KP 開房</h2><label>KP 名稱</label><input id="kpn" placeholder="例如：阿魚"><label>房間名稱</label><input id="rn" placeholder="例如：週五克蘇魯團"><label>劇本</label><select id="sc"><option>自由跑團</option><option>營火</option></select><label>調查員人數上限</label><input id="lim" type="number" min="1" max="50" value="4"><button onclick="createRoom()">建立房間</button></div><div class="card"><h2>訪客加入</h2><label>暱稱</label><input id="gn" placeholder="你的暱稱"><label>房號</label><input id="rc" maxlength="6"><button onclick="joinRoom()">加入房間</button></div><div class="card"><h2>共同 KP 加入</h2><div class="small">通常由房主傳「共同 KP 邀請連結」給你。</div><label>暱稱</label><input id="gkn" placeholder="KP 暱稱"><label>房號</label><input id="gkc" maxlength="6"><label>共同 KP 邀請碼</label><input id="gki" placeholder="邀請連結會自動填入"><button onclick="joinKpRoom()">以共同 KP 加入</button></div></div><div id="err"></div></section>
 <section id="game" class="hide"><div class="topbar"><div><h2 id="title"></h2><span class="pill" id="scene"></span><span class="pill" id="count"></span><span class="pill" id="role"></span></div><div><div class="code" id="roomcode"></div><button class="alt" onclick="copyCode()">複製房號</button> <button class="alt" onclick="copyInvite()">複製玩家邀請</button> <button id="kpinvitebtn" class="alt hide" onclick="copyKpInvite()">複製共同 KP 邀請</button> <button id="kpconsolebtn" class="alt kp hide" onclick="tab('kp')">KP 主持台</button> <button class="alt" onclick="toggleNameEdit()">更改名字</button> <button class="gold" onclick="rules()">規則</button> <button id="leavebtn" class="bad" onclick="leaveRoom()">離開房間</button> <button id="disbandbtn" class="bad hide" onclick="disbandRoom()">解散房間</button></div></div><div id="nameedit" class="card hide"><label>房間顯示名稱</label><div class="row"><input id="selfname" maxlength="30" placeholder="輸入新名稱"><button onclick="renameSelf()">儲存名稱</button><button class="alt" onclick="toggleNameEdit(false)">取消</button></div><div class="small">只修改你在房間與聊天中的顯示名稱；角色卡內的角色名稱不會一起改。</div></div><div id="ended" class="card hide">房間已結束，聊天、擲骰與角色修改已停用。</div><div class="tabs desktop"><button onclick="tab('story')">故事</button><button onclick="tab('chars')">角色</button><button onclick="tab('dice')">擲骰</button><button class="kp" onclick="tab('kp')">KP 主持台</button></div><div class="room"><main>
 <div id="story" class="sec on"><div id="chat" class="chat"></div><div class="row"><input id="ci" placeholder="留言或輸入骰子指令，例如 Ccyc、Cc>70、3 1d6+1d20" onkeydown="if(event.key==='Enter')send()"><button id="sendbtn" onclick="send()">送出</button></div></div>
 <div id="chars" class="sec"><div class="card"><h2>角色卡</h2><div class="small">角色卡預設「僅本人＋KP」。本人可改成全房公開；私人筆記永遠只有本人與 KP 看得到。</div><div id="players"></div></div></div>
