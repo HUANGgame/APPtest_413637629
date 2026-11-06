@@ -958,7 +958,7 @@ def selftest():
             chat(c,ChatIn(token=g['token'],text='x')); raise AssertionError('end lock failed')
         except HTTPException as e:
             assert e.status_code==409; checks.append('end_lock')
-        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.12'}
+        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.13'}
     except Exception as e:
         return JSONResponse({'ok':False,'checks':checks,'error':repr(e)},status_code=500)
     finally:
