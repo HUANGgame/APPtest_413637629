@@ -814,8 +814,20 @@ def selftest():
         chat(c,ChatIn(token=a['token'],text='Dr Cc 60')); assert rooms[c]['hidden'] and 'CoC7 檢定' in rooms[c]['hidden'][-1]['text']; checks.append('darkroll')
         chat(c,ChatIn(token=g['token'],text='1D100 偵查')); assert '｜偵查' in rooms[c]['chat'][-1]['text']; checks.append('dice_comment')
         # clues
-        add_clue(c,ClueIn(token=a['token'],text='KP秘密',visibility='kp')); add_clue(c,ClueIn(token=a['token'],text='公開線索',visibility='public')); checks.append('clues')
-        assert len(state(c,g['token'])['clues'])==1 and len(state(c,a['token'])['clues'])==2; checks.append('clue_privacy')
+        try:
+            add_clue(c,ClueIn(token=a['token'],text='   ',visibility='public')); raise AssertionError('blank clue accepted')
+        except HTTPException as e:
+            assert e.status_code==400; checks.append('clue_blank_guard')
+        add_clue(c,ClueIn(token=a['token'],text='KP秘密',visibility='kp'))
+        add_clue(c,ClueIn(token=a['token'],text='公開線索',visibility='public'))
+        add_clue(c,ClueIn(token=a['token'],text='給A的線索',visibility='player',target=pida))
+        checks.append('clues')
+        ga=state(c,g['token']); gb=state(c,g2['token']); ks=state(c,a['token'])
+        assert any(x['text']=='公開線索' for x in ga['clues']) and any(x['text']=='給A的線索' for x in ga['clues'])
+        assert all(x['text']!='KP秘密' for x in ga['clues'])
+        assert any(x['text']=='公開線索' for x in gb['clues']) and all(x['text']!='給A的線索' for x in gb['clues'])
+        assert len(ks['clues'])==3 and any(x.get('target_name') for x in ks['clues'] if x['visibility']=='player')
+        checks.append('clue_privacy')
         # co-kp
         pidb=next(p['id'] for p in rooms[c]['ps'] if p['token']==g2['token'])
         co_kp(c,CoKpIn(token=a['token'],pid=pidb,enabled=True)); assert state(c,g2['token'])['role']=='kp'; checks.append('co_kp')
@@ -842,7 +854,7 @@ def selftest():
             chat(c,ChatIn(token=g['token'],text='x')); raise AssertionError('end lock failed')
         except HTTPException as e:
             assert e.status_code==409; checks.append('end_lock')
-        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.11'}
+        return {'ok':True,'checks':checks,'count':len(checks),'version':'v8.12'}
     except Exception as e:
         return JSONResponse({'ok':False,'checks':checks,'error':repr(e)},status_code=500)
     finally:
